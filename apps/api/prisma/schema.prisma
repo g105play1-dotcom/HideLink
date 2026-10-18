@@ -1,0 +1,248 @@
+// =============================================================================
+// AnonLink — PostgreSQL schema (Prisma ORM 7)
+// =============================================================================
+// Design rules that this schema deliberately encodes:
+//
+//  1. NO personal data. There is no email, phone, name or password column
+//     anywhere, because AnonLink never asks for them.
+//  2. NO message bodies. Chat text lives only in the API process's memory while
+//     a chat is active. The single, explicit exception is the `messageSnapshot`
+//     on a `Report`, which exists so a human can act on a complaint; it carries
+//     a retention deadline (`expiresAt`) and is deleted by the maintenance job.
+//  3. Identifiers that could be used to correlate a person (`ipHash`,
+//     `userAgentHash`) are stored only as salted SHA-256 hashes, and are only
+//     written for abuse investigation.
+//  4. Public identifiers (`publicId`) are random and unrelated to primary keys,
+//     so a leaked public ID never discloses row counts or internal ordering.
+//  5. Every table that grows without bound carries an explicit retention column
+//     so the maintenance job can trim it.
+//
+// See docs/SECURITY.md and docs/DECISIONS.md for the reasoning behind each rule.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Controls whether other identities may start a *direct* chat with this one.
+enum IncomingRequestPolicy {
+  everyone
+  nobody
+}
+
+enum ChatKind {
+  random
+  direct
+}
+
+enum ChatStatus {
+  active
+  ended
+}
+
+enum ReportReason {
+  spam
+  abuse
+  sexual
+  violence
+  other
+}
+
+enum ReportStatus {
+  open
+  reviewed
+  actioned
+  dismissed
+}
+
+// -----------------------------------------------------------------------------
+// Identity
+// -----------------------------------------------------------------------------
+
+/// An anonymous identity. Created automatically on first use — no sign-up.
+///
+/// `id` is an internal, never-disclosed UUID. `publicId` is the "User ID" the
+/// owner can see and share; it is random and not derivable from `id`.
+model Identity {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  publicId  String   @unique @db.VarChar(14)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  /// Updated on every authenticated request; drives presence and staleness checks.
+  lastSeenAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// Set when the identity is suspended for abuse. Nullable = not banned.
+  bannedAt     DateTime? @db.Timestamptz(3)
+  bannedReason String?   @db.VarChar(200)
+
+  incomingRequests IncomingRequestPolicy @default(everyone)
+
+  sessions       Session[]
+  chatsAsA       ChatSession[] @relation("ChatParticipantA")
+  chatsAsB       ChatSession[] @relation("ChatParticipantB")
+  reportsMade    Report[]      @relation("ReportReporter")
+  reportsAgainst Report[]      @relation("ReportTarget")
+  blocksCreated  Block[]       @relation("BlockCreator")
+  blocksReceived Block[]       @relation("BlockTarget")
+  securityEvents SecurityEvent[]
+
+  @@index([lastSeenAt])
+  @@index([bannedAt])
+}
+
+// -----------------------------------------------------------------------------
+// Sessions
+// -----------------------------------------------------------------------------
+
+/// A bearer session belonging to an anonymous identity.
+///
+/// Only `tokenHash` (SHA-256 of the random token) is persisted: a database leak
+/// therefore does not hand out usable sessions. The raw token exists solely in
+/// the browser's HttpOnly cookie.
+model Session {
+  id         String @id @default(uuid(7)) @db.Uuid
+  identityId String @db.Uuid
+
+  /// SHA-256 hex digest of the session token. 64 hex characters.
+  tokenHash String @unique @db.Char(64)
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  lastUsedAt DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+
+  /// Salted SHA-256 of the originating client IP. Optional, abuse-investigation only.
+  ipHash String? @db.Char(64)
+  /// Salted SHA-256 of the User-Agent. Optional, abuse-investigation only.
+  userAgentHash String? @db.Char(64)
+
+  identity Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@index([identityId])
+  @@index([expiresAt])
+}
+
+// -----------------------------------------------------------------------------
+// Chats
+// -----------------------------------------------------------------------------
+
+/// Lifecycle record of a chat between two identities.
+///
+/// This table intentionally contains NO message bodies and NO message history:
+/// AnonLink does not keep transcripts. Only metadata needed to run the service,
+/// detect abuse patterns and enforce blocks is stored.
+model ChatSession {
+  id        String     @id @default(uuid(7)) @db.Uuid
+  kind      ChatKind
+  status    ChatStatus @default(active)
+
+  startedAt DateTime  @default(now()) @db.Timestamptz(3)
+  endedAt   DateTime? @db.Timestamptz(3)
+  /// One of `ChatEndReason` from @anonlink/shared.
+  endReason String?   @db.VarChar(32)
+
+  participantAId String   @db.Uuid
+  participantBId String   @db.Uuid
+  /// The identity that caused the chat to start. Always one of the participants.
+  initiatorId    String   @db.Uuid
+
+  participantA Identity @relation("ChatParticipantA", fields: [participantAId], references: [id], onDelete: Cascade)
+  participantB Identity @relation("ChatParticipantB", fields: [participantBId], references: [id], onDelete: Cascade)
+
+  /// Coarse counter used for flood detection. Not a transcript.
+  messageCount Int @default(0)
+
+  reports Report[]
+
+  @@index([participantAId, status])
+  @@index([participantBId, status])
+  @@index([status, startedAt])
+  @@index([initiatorId])
+}
+
+// -----------------------------------------------------------------------------
+// Moderation
+// -----------------------------------------------------------------------------
+
+/// A user-submitted abuse report.
+///
+/// `messageSnapshot` is the *only* place in the database where message text can
+/// exist. It is always taken from the server's own in-memory copy of the message
+/// (never from client input) and it is deleted once `expiresAt` passes.
+model Report {
+  id     String  @id @default(uuid(7)) @db.Uuid
+  chatId String? @db.Uuid
+
+  reporterId String @db.Uuid
+  targetId   String @db.Uuid
+
+  reason  ReportReason
+  details String?      @db.VarChar(1000)
+
+  /// Server-side id of the reported message, when the report is message-specific.
+  messageId String? @db.VarChar(64)
+  /// Server-side snapshot of the reported message text. Retention-bound.
+  messageSnapshot String? @db.VarChar(4000)
+
+  status    ReportStatus @default(open)
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+  /// Retention deadline. The maintenance job hard-deletes expired reports.
+  expiresAt DateTime     @db.Timestamptz(3)
+
+  chat     ChatSession? @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  reporter Identity     @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  target   Identity     @relation("ReportTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([expiresAt])
+  @@index([targetId, createdAt])
+  @@index([reporterId, createdAt])
+}
+
+/// A one-directional block: `blocker` never wants to be matched with `blocked`.
+///
+/// Blocks are checked in both directions before a chat is created, so blocking is
+/// symmetric in effect even though each direction is stored separately.
+model Block {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  blockerId String   @db.Uuid
+  blockedId String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  blocker Identity @relation("BlockCreator", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked Identity @relation("BlockTarget", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+/// Low-frequency, high-signal technical events used to investigate abuse.
+///
+/// Deliberately restricted to coarse event types. Message content, message text
+/// and IP addresses must never be written here. High-frequency events such as
+/// rate-limit trips are aggregated in memory instead, so this table cannot be
+/// used as a write amplifier against the database.
+model SecurityEvent {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// Short machine-readable event name, e.g. `contact_blocked`.
+  type String @db.VarChar(48)
+
+  identityId String?  @db.Uuid
+  /// Coarse target reference (never a raw IP address).
+  targetId   String?  @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  /// Retention deadline enforced by the maintenance job.
+  expiresAt DateTime @db.Timestamptz(3)
+
+  identity Identity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([type, createdAt])
+  @@index([identityId, createdAt])
+  @@index([expiresAt])
+}

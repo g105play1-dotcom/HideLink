@@ -1,0 +1,26 @@
+# Normalise line endings so the repository does not churn between Windows, Linux
+# and CI checkouts.
+#
+# Source files are stored with LF and checked out with LF everywhere. PowerShell
+# scripts are the deliberate exception: Windows PowerShell 5.1 mis-parses files
+# that use LF in some constructs, so they are checked out with CRLF.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets must never be normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.exe binary
+
+# Keep lockfiles and markers out of diff noise and merge conflicts.
+pnpm-lock.yaml -diff linguist-generated

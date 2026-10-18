@@ -1,0 +1,17 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'tests/*'
+
+# pnpm >= 11 blocks dependency build scripts by default and treats unapproved
+# builds as a hard error. Only these packages are allowed to run scripts; every
+# other transitive dependency stays script-free to reduce supply-chain risk.
+#   prisma / @prisma/engines  — downloads/verifies the Prisma engine artefacts
+#   esbuild                   — installs its platform binary (used by vitest/tsx)
+allowBuilds:
+  prisma: true
+  '@prisma/engines': true
+  esbuild: true
+
+# Keep peer resolution predictable in a mixed ESM monorepo.
+strictPeerDependencies: false
