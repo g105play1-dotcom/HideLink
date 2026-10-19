@@ -1,0 +1,44 @@
+# =============================================================================
+# UNVERIFIED. This file has never been run against AnonLink.
+#
+# It is a starting point for the reverse proxy described in infrastructure/README.md,
+# not a tested configuration. Read it against the real requirements before using it:
+#
+#   * the web app is served on 127.0.0.1:3000, the API on 127.0.0.1:3001;
+#   * `api.example.com` must be one of the exact origins in `CORS_ORIGINS`
+#     (an API on its own subdomain means LISTENING on that host too, because the
+#     browser talks to the API origin directly - see docs/DECISIONS.md D10);
+#   * the API must run with `TRUST_PROXY=true` and `COOKIE_SECURE=true` behind this.
+# =============================================================================
+
+{
+	email ops@example.com
+}
+
+# Replace with the real host name. Caddy obtains and renews the certificate itself.
+app.example.com {
+	encode zstd gzip
+
+	# Everything except the API prefix goes to Next.js.
+	@api path /api/* /socket.io/*
+	handle @api {
+		reverse_proxy 127.0.0.1:3001
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Deliberately plain: the API sets its own security headers, and duplicating a
+	# Content-Security-Policy here without reading it would break the app rather
+	# than harden it.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/anonlink.log
+		format json
+	}
+}
