@@ -79,6 +79,17 @@ function chipClass(active: boolean): string {
   return cn(CHIP, active ? CHIP_ON : CHIP_OFF);
 }
 
+/**
+ * The interface's own value for "no constraint" in a multi-select.
+ *
+ * It never reaches the wire and exists in no shared vocabulary: for both the gender and
+ * the place filter, "any" *is* the empty list (docs/DECISIONS.md D22/D25). The sentinel
+ * exists so the neutral state can be a real, visibly pressed chip — an empty row of chips
+ * reads as an unfinished form, not as a decision, and the user asked for exactly that
+ * button.
+ */
+const ANY = 'any' as const;
+
 /** A set of toggle buttons over one vocabulary. */
 function MultiChoice<T extends string>({
   legend,
@@ -429,7 +440,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
   const [genders, setGenders] = useState<Gender[]>([...session.search.genders]);
   const [ageMin, setAgeMin] = useState(boundValue(session.search.ageMin));
   const [ageMax, setAgeMax] = useState(boundValue(session.search.ageMax));
-  const [location, setLocation] = useState<LocationMode>(session.search.location);
+  const [locations, setLocations] = useState<LocationMode[]>([...session.search.locations]);
   const [languages, setLanguages] = useState<Language[]>([...session.search.languages]);
   const [relaxAllowed, setRelaxAllowed] = useState(session.search.relaxAllowed);
 
@@ -446,12 +457,26 @@ function FiltersSection({ session }: { session: SessionInfo }) {
     genders,
     ageMin: parseBound(ageMin),
     ageMax: parseBound(ageMax),
-    location,
+    locations,
     languages,
     relaxAllowed,
   });
 
   const preview = draft.success ? describeCriteria(draft.data) : [];
+
+  /**
+   * Place filters that cannot match anybody yet, because the matching half of the
+   * comparison ("my city") has not been declared.
+   *
+   * Worth saying out loud rather than blocking: ordering the filters before filling in
+   * the profile is a legitimate thing to do, and the filter starts working the moment the
+   * place is declared. Left unsaid it is indistinguishable from a broken search, which is
+   * the same failure the inverted age range is refused for.
+   */
+  const undeclaredPlaces = [
+    locations.includes('city') && !session.profile.city ? 'город' : null,
+    locations.includes('region') && !session.profile.region ? 'регион' : null,
+  ].filter((value): value is string => value !== null);
 
   function toggle<T>(list: readonly T[], value: T): T[] {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -470,10 +495,14 @@ function FiltersSection({ session }: { session: SessionInfo }) {
 
       <MultiChoice
         legend="Пол собеседника"
-        options={GENDERS}
-        selected={genders}
-        onToggle={(value) => setGenders((current) => toggle(current, value))}
-        labelFor={(value) => GENDER_LABELS[value]}
+        // «Любой» is the first chip rather than an empty row: see `ANY`.
+        options={[ANY, ...GENDERS]}
+        selected={genders.length === 0 ? [ANY] : genders}
+        onToggle={(value) => {
+          if (value === ANY) setGenders([]);
+          else setGenders((current) => toggle(current, value));
+        }}
+        labelFor={(value) => (value === ANY ? 'Любой' : GENDER_LABELS[value])}
         disabled={save.isPending}
       />
 
@@ -500,17 +529,27 @@ function FiltersSection({ session }: { session: SessionInfo }) {
         </div>
       </fieldset>
 
-      <SingleChoice
+      <MultiChoice
         legend="Где искать"
-        options={LOCATION_MODES}
-        value={location}
-        onChange={(value) => {
-          // `LOCATION_MODES` has no "not stated": 'any' *is* the neutral value.
-          if (value !== null) setLocation(value);
+        // Several places is meaningful, and not the same as the widest one alone: a
+        // candidate who declared a city but no region matches «Только мой город» and
+        // not «Только мой регион» (docs/DECISIONS.md D25).
+        options={[ANY, ...LOCATION_MODES]}
+        selected={locations.length === 0 ? [ANY] : locations}
+        onToggle={(value) => {
+          if (value === ANY) setLocations([]);
+          else setLocations((current) => toggle(current, value));
         }}
-        labelFor={(value) => (value === null ? '' : LOCATION_LABELS[value])}
+        labelFor={(value) => (value === ANY ? 'Любой' : LOCATION_LABELS[value])}
         disabled={save.isPending}
       />
+
+      {undeclaredPlaces.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          В разделе «О вас» не указан {undeclaredPlaces.join(' и ')} — пока этот фильтр не найдёт
+          никого.
+        </p>
+      ) : null}
 
       <LanguagePicker
         legend="Общий язык"

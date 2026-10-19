@@ -17,6 +17,7 @@ import {
   isGender,
   isLanguage,
   isLocationMode,
+  LOCATION_MODES,
   type DeclaredProfile,
   type Gender,
   type IdentitySettingsView,
@@ -45,7 +46,7 @@ export interface IdentitySettingsRow {
   prefGenders: readonly string[];
   prefAgeMin: number | null;
   prefAgeMax: number | null;
-  prefLocation: string;
+  prefLocations: readonly string[];
   prefLanguages: readonly string[];
   prefRelax: boolean;
 }
@@ -62,7 +63,7 @@ export const IDENTITY_SETTINGS_SELECT = {
   prefGenders: true,
   prefAgeMin: true,
   prefAgeMax: true,
-  prefLocation: true,
+  prefLocations: true,
   prefLanguages: true,
   prefRelax: true,
 } as const satisfies Record<keyof IdentitySettingsRow, true>;
@@ -75,6 +76,20 @@ function toIncomingRequests(value: string): IncomingRequestPolicy {
 
 function languages(values: readonly string[]): Language[] {
   return values.filter(isLanguage);
+}
+
+/**
+ * The place modes actually stored, in vocabulary order.
+ *
+ * Narrowing through `isLocationMode` is what makes an unrecognised or legacy value
+ * disappear rather than reach the matchmaker — and disappearing here means "anywhere",
+ * which is the same bounded fail-open the gender filter has (see docs/DECISIONS.md D22).
+ * `LOCATION_MODES` supplies the order and drops duplicates, so two rows holding the same
+ * choice written in a different order still compare equal.
+ */
+function locations(values: readonly string[]): LocationMode[] {
+  const chosen = new Set(values.filter(isLocationMode));
+  return LOCATION_MODES.filter((mode) => chosen.has(mode));
 }
 
 export function toDeclaredProfile(row: IdentitySettingsRow): DeclaredProfile {
@@ -92,7 +107,7 @@ export function toSearchPreferences(row: IdentitySettingsRow): SearchPreferences
     genders: row.prefGenders.filter(isGender),
     ageMin: row.prefAgeMin,
     ageMax: row.prefAgeMax,
-    location: isLocationMode(row.prefLocation) ? row.prefLocation : 'any',
+    locations: locations(row.prefLocations),
     languages: languages(row.prefLanguages),
     relaxAllowed: row.prefRelax,
   };
@@ -139,7 +154,7 @@ export interface IdentitySettingsData {
   prefGenders?: Gender[];
   prefAgeMin?: number | null;
   prefAgeMax?: number | null;
-  prefLocation?: LocationMode;
+  prefLocations?: LocationMode[];
   prefLanguages?: Language[];
   prefRelax?: boolean;
 }
@@ -169,7 +184,7 @@ export function preferencesToColumns(search: SearchPreferences): IdentitySetting
     prefGenders: [...search.genders],
     prefAgeMin: search.ageMin,
     prefAgeMax: search.ageMax,
-    prefLocation: search.location,
+    prefLocations: [...search.locations],
     prefLanguages: [...search.languages],
     prefRelax: search.relaxAllowed,
   };

@@ -175,7 +175,7 @@ describe('filtered random search', () => {
   it('compares declared places after folding case, spacing and ё/е — and nothing more', async () => {
     const seeker = await participant({
       profile: { city: 'Королёв' },
-      search: { location: 'city' },
+      search: { locations: ['city'] },
     });
     const anotherCity = await participant({ profile: { city: 'Москва' } });
 
@@ -188,6 +188,22 @@ describe('filtered random search', () => {
     const sameTown = await participant({ profile: { city: '  королев ' } });
     const started = expectSharedChat(seeker, sameTown);
     await join(sameTown);
+    await started;
+  });
+
+  it('accepts a peer matching either of two selected places', async () => {
+    const seeker = await participant({
+      profile: { city: 'Казань', region: 'Татарстан' },
+      search: { locations: ['city', 'region'] },
+    });
+
+    // City declared, region not: the union accepts them, and «только мой регион» alone
+    // would have refused — which is why the filter is a set and not a single mode.
+    const cityOnly = await participant({ profile: { city: 'Казань' } });
+
+    await join(seeker);
+    const started = expectSharedChat(seeker, cityOnly);
+    await join(cityOnly);
     await started;
   });
 
@@ -279,7 +295,7 @@ describe('filter and profile validation', () => {
         genders: ['male'],
         ageMin: 25,
         ageMax: 45,
-        location: 'city',
+        locations: ['city'],
         languages: ['ru'],
         relaxAllowed: true,
       },
@@ -311,7 +327,7 @@ describe('filter and profile validation', () => {
     const client = await RealtimeClient.connect(identity);
     open.push(client);
 
-    const good = await patchSettings(identity, { search: { location: 'region', ageMin: 20 } });
+    const good = await patchSettings(identity, { search: { locations: ['region'], ageMin: 20 } });
     expect(good.status).toBe(200);
 
     const bad = await patchSettingsExpectingFailure(identity, { search: { ageMax: 19 } });
@@ -320,7 +336,7 @@ describe('filter and profile validation', () => {
     const current = await http<{ authenticated: boolean; session: SessionView }>('/session', {
       cookie: identity.cookie,
     });
-    expect(current.body.session.settings.search.location).toBe('region');
+    expect(current.body.session.settings.search.locations).toEqual(['region']);
     expect(current.body.session.settings.search.ageMin).toBe(20);
     expect(current.body.session.settings.search.ageMax).toBeNull();
   });

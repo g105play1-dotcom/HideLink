@@ -35,8 +35,13 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
   ar: 'Арабский',
 };
 
+/**
+ * The place modes, as the user reads them.
+ *
+ * There is no label for "anywhere": that is the empty selection, and the settings render
+ * it as an explicit «Любой» chip next to these (docs/DECISIONS.md D22/D25).
+ */
 export const LOCATION_LABELS: Record<LocationMode, string> = {
-  any: 'Любой город',
   city: 'Только мой город',
   region: 'Только мой регион',
 };
@@ -87,8 +92,8 @@ export function describeCriteria(criteria: SearchPreferences): string[] {
     lines.push(`Возраст: до ${criteria.ageMax}`);
   }
 
-  if (criteria.location !== 'any') {
-    lines.push(LOCATION_LABELS[criteria.location]);
+  for (const mode of criteria.locations) {
+    lines.push(LOCATION_LABELS[mode]);
   }
 
   if (criteria.languages.length > 0) {

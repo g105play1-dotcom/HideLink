@@ -148,6 +148,61 @@ test.describe('filtered search', () => {
     expectNoClientErrors(bob);
   });
 
+  test('every filter row offers an explicit "Любой", and it really clears the filter', async ({
+    browser,
+  }) => {
+    const alice = await newIdentity(browser);
+    await openSettings(alice.page);
+
+    const panel = alice.page.locator('#settings-panel');
+    const genderRow = panel.getByRole('group', { name: 'Пол собеседника', exact: true });
+    const placeRow = panel.getByRole('group', { name: 'Где искать', exact: true });
+
+    // The neutral state is a pressed button, not an empty row of chips: an empty row
+    // reads as an unfinished form rather than as a decision (docs/DECISIONS.md D22).
+    await expect(genderRow.getByRole('button', { name: 'Любой', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(placeRow.getByRole('button', { name: 'Любой', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // Two places at once is the point of the row being a list rather than a choice.
+    await togglePartnerGender(alice.page, 'Женский');
+    await placeRow.getByRole('button', { name: 'Только мой город', exact: true }).click();
+    await placeRow.getByRole('button', { name: 'Только мой регион', exact: true }).click();
+
+    // She has declared no place of her own, so the filter can match nobody yet. Said out
+    // loud, because a filter that silently matches nothing is indistinguishable from a
+    // broken search.
+    await expect(panel.getByText(/не указан город и регион/)).toBeVisible();
+
+    await saveFilters(alice.page);
+    await closeSettings(alice.page);
+
+    // The applied filters come from the server, so this is the round trip and not the form.
+    await expect(alice.page.getByText('Пол: Женский')).toBeVisible();
+    await expect(alice.page.getByText('Только мой город')).toBeVisible();
+    await expect(alice.page.getByText('Только мой регион')).toBeVisible();
+
+    await openSettings(alice.page);
+    await genderRow.getByRole('button', { name: 'Любой', exact: true }).click();
+    await placeRow.getByRole('button', { name: 'Любой', exact: true }).click();
+    await expect(panel.getByText(/не указан город и регион/)).toHaveCount(0);
+
+    await saveFilters(alice.page);
+    await closeSettings(alice.page);
+
+    await expect(alice.page.getByText('Без фильтров — подойдёт любой собеседник.')).toBeVisible();
+    await expect(alice.page.getByText('Пол: Женский')).toHaveCount(0);
+    await expect(alice.page.getByText('Только мой город')).toHaveCount(0);
+    await expect(alice.page.getByText('Только мой регион')).toHaveCount(0);
+
+    expectNoClientErrors(alice);
+  });
+
   test('an impossible age range is refused in the interface before it is sent', async ({
     browser,
   }) => {

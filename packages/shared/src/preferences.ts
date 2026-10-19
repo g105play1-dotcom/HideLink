@@ -51,8 +51,16 @@ export type Gender = (typeof GENDERS)[number];
 export const LANGUAGES = ['ru', 'en', 'uk', 'kk', 'de', 'fr', 'es', 'tr', 'zh', 'ar'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-/** How the searcher's own declared place constrains the candidate's. */
-export const LOCATION_MODES = ['any', 'city', 'region'] as const;
+/**
+ * Where the searcher's own declared place constrains the candidate's.
+ *
+ * There is deliberately no `any` member: "anywhere" is the *empty* selection, exactly as
+ * with the gender filter. A selectable "any" inside the vocabulary would be a value whose
+ * meaning is "no value", and the two notions would eventually drift apart (the permission
+ * "relax this criterion" would then have something to remove that was never a filter).
+ * See docs/DECISIONS.md D25.
+ */
+export const LOCATION_MODES = ['city', 'region'] as const;
 export type LocationMode = (typeof LOCATION_MODES)[number];
 
 export const PROFILE_LIMITS = {
@@ -103,7 +111,14 @@ export interface SearchPreferences {
   genders: readonly Gender[];
   ageMin: number | null;
   ageMax: number | null;
-  location: LocationMode;
+  /**
+   * Which of the searcher's own places a candidate has to share.
+   *
+   * An empty selection is "anywhere". Selecting both is not the same as selecting
+   * `region` alone: it accepts a candidate who matches *either*, so someone who declared
+   * a city but no region satisfies the first and not the second.
+   */
+  locations: readonly LocationMode[];
   languages: readonly Language[];
   /**
    * Whether the server may drop filters, visibly, after a long wait.
@@ -118,7 +133,7 @@ export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
   genders: [],
   ageMin: null,
   ageMax: null,
-  location: 'any',
+  locations: [],
   languages: [],
   relaxAllowed: false,
 };
@@ -188,7 +203,7 @@ export const searchPreferencesSchema = z
     genders: z.array(genderSchema).max(GENDERS.length),
     ageMin: z.number().int().min(PROFILE_LIMITS.AGE_MIN).max(PROFILE_LIMITS.AGE_MAX).nullable(),
     ageMax: z.number().int().min(PROFILE_LIMITS.AGE_MIN).max(PROFILE_LIMITS.AGE_MAX).nullable(),
-    location: locationModeSchema,
+    locations: z.array(locationModeSchema).max(LOCATION_MODES.length),
     languages: z.array(languageSchema).max(LANGUAGES.length),
     relaxAllowed: z.boolean(),
   })
@@ -232,7 +247,7 @@ export const searchPreferencesUpdateSchema = z
       .max(PROFILE_LIMITS.AGE_MAX)
       .nullable()
       .optional(),
-    location: locationModeSchema.optional(),
+    locations: z.array(locationModeSchema).max(LOCATION_MODES.length).optional(),
     languages: z.array(languageSchema).max(LANGUAGES.length).optional(),
     relaxAllowed: z.boolean().optional(),
   })
@@ -328,12 +343,18 @@ export function preferencesFit(
     if (prefs.ageMax !== null && age > prefs.ageMax) return false;
   }
 
-  if (prefs.location !== 'any') {
-    const mine = normalizePlace(prefs.location === 'city' ? searcher.city : searcher.region);
-    const theirs = normalizePlace(prefs.location === 'city' ? candidate.city : candidate.region);
+  if (prefs.locations.length > 0) {
+    // "One of the places I named", not "all of them": selecting both is a wider search
+    // than selecting either, which is what a multi-select has to mean.
+    const sharesAPlace = prefs.locations.some((mode) => {
+      const mine = normalizePlace(mode === 'city' ? searcher.city : searcher.region);
+      const theirs = normalizePlace(mode === 'city' ? candidate.city : candidate.region);
 
-    // Declaring nothing cannot satisfy "same as mine": guessing would match strangers.
-    if (mine === null || theirs === null || mine !== theirs) return false;
+      // Declaring nothing cannot satisfy "same as mine": guessing would match strangers.
+      return mine !== null && theirs !== null && mine === theirs;
+    });
+
+    if (!sharesAPlace) return false;
   }
 
   if (prefs.languages.length > 0) {
@@ -406,7 +427,7 @@ function criterionIsSet(prefs: SearchPreferences, criterion: RelaxableCriterion)
     case 'age':
       return prefs.ageMin !== null || prefs.ageMax !== null;
     case 'location':
-      return prefs.location !== 'any';
+      return prefs.locations.length > 0;
     case 'languages':
       return prefs.languages.length > 0;
   }
@@ -420,7 +441,7 @@ function dropCriterion(prefs: SearchPreferences, criterion: RelaxableCriterion):
     case 'age':
       return { ...prefs, ageMin: null, ageMax: null };
     case 'location':
-      return { ...prefs, location: 'any' };
+      return { ...prefs, locations: [] };
     case 'languages':
       return { ...prefs, languages: [] };
   }

@@ -132,8 +132,9 @@ model Identity {
   /// Inclusive age bounds applied to the *candidate's* declared year of birth.
   prefAgeMin   Int?
   prefAgeMax   Int?
-  /// `any` | `city` | `region` — compares the candidate's declared place with the owner's.
-  prefLocation String   @default("any") @db.VarChar(16)
+  /// `city` | `region` — the owner's own declared places the candidate must share at
+  /// least one of. Empty = anywhere (there is no stored "any" value; see D22).
+  prefLocations String[] @default([])
   /// Languages the owner wants the candidate to share at least one of. Empty = no constraint.
   prefLanguages String[] @default([])
   /// Whether the server may drop filters, visibly, after a long wait. Off by default.

@@ -434,3 +434,43 @@ still gets the refusal rather than succeeding.
 **Rejected.** Removing the block feature entirely (the owner wants it available, just optional);
 deleting existing blocks when the feature is switched off (it would silently unblock people the user
 had deliberately blocked); an interface-only rule.
+
+## D25. Every filter row is a list with an explicit "Любой", and "Где искать" is a set
+
+**Context.** The owner read the new settings screen and asked two questions about its filter rows:
+why the "Пол собеседника" row had no "любой" button, and why "Где искать" was not the same kind of
+list, able to hold several answers at once. Both rows were, in effect, the same complaint: the
+neutral state was invisible, and one of the two filters could only say one thing.
+
+**Decision.** A filter row renders its neutral state as a real, pressed chip — «Любой» — placed
+first, before the values. It is a value of the *interface*, never of the wire: for both rows "any"
+**is** the empty list. The shared vocabularies therefore have no `any` member
+(`LOCATION_MODES = ['city', 'region']`, exactly as `GENDERS` has no "любой"), so there is one way to
+express "no constraint" and the relaxation step ("drop this filter") always means the same thing:
+empty the list.
+
+`SearchPreferences.location: LocationMode` became `locations: readonly LocationMode[]`, an **or**:
+a candidate is accepted if they share *either* selected place. That is not the same as the widest
+single value — someone who declared a city but no region matches «Только мой город» and not «Только
+мой регион» — which is why the set is worth having rather than collapsing to one mode.
+
+The column moved with it: `prefLocation String @default("any")` became
+`prefLocations String[] @default([])`, carrying every stored value across before the old column is
+dropped (migration `20261019153000_search_multiple_places`, whose comment holds the rollback plan:
+re-create `prefLocation` from the first element of the set, having exported the rows that hold two).
+
+**Consequences.** The settings screen warns, without blocking the save, when a place filter is
+switched on and the matching half of the comparison — the user's own city or region — is still
+undeclared. The filter is not invalid and starts working the moment the place is declared, but a
+filter that silently matches nobody looks exactly like a broken search. Reading the column narrows
+each value through `isLocationMode` and re-orders through `LOCATION_MODES`; an unrecognised value
+therefore disappears, which means "anywhere" — the same bounded fail-open as an unreadable gender
+(stored by hand, never by the validated update path). A stored value of `'any'` from before this
+decision also degrades to "anywhere", which is what it meant.
+
+**Rejected.** Keeping `'any'` inside the vocabulary as a fourth chip (a value whose meaning is "no
+value", with the relaxation step then able to remove a filter that was never set); a UI-only
+multi-select that stored just one mode (it would show the user two answers and act on one); leaving
+the neutral state implicit (the owner read an empty row as a missing control, and a reader cannot
+tell "not answered" from "answered: anything"); refusing to save until the city is declared (the
+filters are legitimately set before the profile, and the server accepts the filter either way).

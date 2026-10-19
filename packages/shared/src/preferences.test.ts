@@ -110,7 +110,7 @@ describe('preferencesFit', () => {
   });
 
   it("compares the candidate against the searcher's own declared place", () => {
-    const sameCity = prefs({ location: 'city' });
+    const sameCity = prefs({ locations: ['city'] });
 
     expect(preferencesFit(sameCity, profile({ city: 'казань' }), searcher, NOW)).toBe(true);
     expect(preferencesFit(sameCity, profile({ city: 'Москва' }), searcher, NOW)).toBe(false);
@@ -121,7 +121,7 @@ describe('preferencesFit', () => {
   });
 
   it('uses the region for the region mode', () => {
-    const sameRegion = prefs({ location: 'region' });
+    const sameRegion = prefs({ locations: ['region'] });
 
     expect(
       preferencesFit(
@@ -134,6 +134,28 @@ describe('preferencesFit', () => {
     expect(preferencesFit(sameRegion, profile({ region: 'Башкортостан' }), searcher, NOW)).toBe(
       false,
     );
+  });
+
+  it('accepts a candidate matching *either* selected place, which is wider than one', () => {
+    const both = prefs({ locations: ['city', 'region'] });
+    const abroad = profile({ city: 'Москва', region: 'Москва' });
+
+    // A peer who declared a city but no region: the city matches, the region does not, so
+    // selecting both is strictly more permissive than selecting «только мой регион».
+    expect(preferencesFit(both, profile({ city: 'Казань' }), searcher, NOW)).toBe(true);
+    expect(preferencesFit(both, profile({ region: 'Татарстан' }), searcher, NOW)).toBe(true);
+    expect(preferencesFit(both, abroad, searcher, NOW)).toBe(false);
+
+    expect(
+      preferencesFit(prefs({ locations: ['region'] }), profile({ city: 'Казань' }), searcher, NOW),
+    ).toBe(false);
+  });
+
+  it('treats an empty selection as "anywhere"', () => {
+    // The neutral state is the absence of the list, not a stored "any" value: the
+    // vocabulary has no member for it (docs/DECISIONS.md D25).
+    expect(preferencesFit(prefs(), profile({ city: 'Москва' }), searcher, NOW)).toBe(true);
+    expect(preferencesFit(prefs(), profile(), searcher, NOW)).toBe(true);
   });
 
   it('needs at least one shared language', () => {
@@ -149,7 +171,7 @@ describe('preferencesFit', () => {
       genders: ['female'],
       ageMin: 25,
       ageMax: 35,
-      location: 'city',
+      locations: ['city'],
       languages: ['ru'],
     });
     const ideal = profile({
@@ -201,7 +223,7 @@ describe('relaxation', () => {
     genders: ['female'],
     ageMin: 25,
     ageMax: 35,
-    location: 'city',
+    locations: ['city'],
     languages: ['ru'],
   });
 
@@ -211,7 +233,7 @@ describe('relaxation', () => {
     const one = relaxBySteps(strict, 1);
     expect(one.dropped).toEqual(['languages']);
     expect(one.criteria.languages).toEqual([]);
-    expect(one.criteria.location).toBe('city');
+    expect(one.criteria.locations).toEqual(['city']);
     expect(one.criteria.ageMin).toBe(25);
     expect(one.criteria.genders).toEqual(['female']);
 
@@ -276,7 +298,7 @@ describe('schemas', () => {
       genders: ['female', 'male'],
       ageMin: 18,
       ageMax: 99,
-      location: 'region',
+      locations: ['region'],
       languages: ['ru', 'en'],
       relaxAllowed: true,
     });
@@ -307,6 +329,14 @@ describe('schemas', () => {
     expect(searchPreferencesUpdateSchema.safeParse({ languages: ['klingon'] }).success).toBe(false);
     expect(searchPreferencesUpdateSchema.safeParse({ genders: ['elf'] }).success).toBe(false);
     expect(searchPreferencesUpdateSchema.safeParse({ nested: {} }).success).toBe(false);
+  });
+
+  it('no longer accepts "any" as a place mode, because "anywhere" is the empty list', () => {
+    // A stored "any" would be a value that means "no value", and the relaxation step
+    // ("drop the place filter") would have two ways to express one state
+    // (docs/DECISIONS.md D25).
+    expect(searchPreferencesUpdateSchema.safeParse({ locations: ['any'] }).success).toBe(false);
+    expect(searchPreferencesUpdateSchema.safeParse({ locations: [] }).success).toBe(true);
   });
 
   it('no longer accepts "other" as a gender', () => {

@@ -328,7 +328,7 @@ describe('sessions and identities', () => {
         'prefGenders',
         'prefAgeMin',
         'prefAgeMax',
-        'prefLocation',
+        'prefLocations',
         'prefLanguages',
         'prefRelax',
       ]),
