@@ -132,7 +132,25 @@ export function AdminScreen() {
     retry: false,
   });
 
+  const available = status.isSuccess && status.data.available;
+
+  /**
+   * Asks the server whether this browser is already the owner.
+   *
+   * The key is exchanged for a cookie that outlives a reload, so assuming "not signed in"
+   * on every mount would make the owner paste the key again after each refresh for no
+   * reason. This shares its cache entry with the panel's own policy query, so it costs no
+   * extra request once the panel is mounted.
+   */
+  const probe = useQuery({
+    queryKey: ['admin', 'policy'],
+    queryFn: () => apiRequest<ArchivePolicy>('/admin/policy'),
+    enabled: available,
+    retry: false,
+  });
+
   const [unlocked, setUnlocked] = useState(false);
+  const signedIn = unlocked || probe.isSuccess;
 
   return (
     <main id="main" className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-8">
@@ -166,13 +184,20 @@ export function AdminScreen() {
         </Card>
       ) : null}
 
-      {status.isSuccess && status.data.available ? (
-        unlocked ? (
-          <AdminPanel onLocked={() => setUnlocked(false)} />
-        ) : (
-          <KeyGate onUnlocked={() => setUnlocked(true)} />
-        )
+      {available && !signedIn && probe.isPending ? (
+        <Card>
+          <CardContent className="flex items-center gap-2 pt-6 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Проверяю доступ…
+          </CardContent>
+        </Card>
       ) : null}
+
+      {available && !signedIn && probe.isError ? (
+        <KeyGate onUnlocked={() => setUnlocked(true)} />
+      ) : null}
+
+      {available && signedIn ? <AdminPanel onLocked={() => setUnlocked(false)} /> : null}
     </main>
   );
 }
@@ -184,12 +209,18 @@ export function AdminScreen() {
  * has to be kept in `localStorage` — where any script on the page could read it.
  */
 function KeyGate({ onUnlocked }: { onUnlocked: () => void }) {
+  const queryClient = useQueryClient();
   const [token, setToken] = useState('');
 
   const open = useMutation({
     mutationFn: () => apiRequest<void>('/admin/session', { method: 'POST', json: { token } }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setToken('');
+      // The failed probe is still cached as an error; drop it so the panel fetches with
+      // the cookie the server just set instead of showing the error it inherited. Only the
+      // policy key is reset: resetting `['admin']` would also reset the availability probe
+      // and flash "Проверяю доступ…" over a page that is already open.
+      await queryClient.resetQueries({ queryKey: ['admin', 'policy'] });
       onUnlocked();
     },
   });
@@ -209,7 +240,8 @@ function KeyGate({ onUnlocked }: { onUnlocked: () => void }) {
         </CardTitle>
         <CardDescription>
           Длинная строка, заданная в <code className="font-mono text-xs">ADMIN_TOKEN</code> в файле{' '}
-          <code className="font-mono text-xs">.env</code>. Вводится один раз за сессию браузера.
+          <code className="font-mono text-xs">.env</code>. Вводится один раз: сервер запоминает вход
+          на несколько часов, поэтому после перезагрузки страницы ключ не спрашивают.
         </CardDescription>
       </CardHeader>
 
@@ -262,10 +294,19 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
 
   const [openChatId, setOpenChatId] = useState<string | null>(null);
 
+  // Signing out and re-entering the key both have to drop the cached policy, because the
+  // screen above decides between the key form and this panel by whether that query
+  // succeeded. Without it the panel would keep rendering — or the button below would look
+  // dead — while the server already refuses the requests.
+  const forgetSession = () => {
+    queryClient.removeQueries({ queryKey: ['admin', 'policy'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'archives'] });
+  };
+
   const lock = useMutation({
     mutationFn: () => apiRequest<void>('/admin/session', { method: 'DELETE' }),
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: ['admin'] });
+      forgetSession();
       onLocked();
     },
   });
@@ -281,7 +322,14 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
           <p className="text-sm text-destructive" role="alert">
             Ключ больше не действует. Введите его снова.
           </p>
-          <Button onClick={onLocked}>Ввести ключ</Button>
+          <Button
+            onClick={() => {
+              forgetSession();
+              onLocked();
+            }}
+          >
+            Ввести ключ
+          </Button>
         </CardContent>
       </Card>
     );
