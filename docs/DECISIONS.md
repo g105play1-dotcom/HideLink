@@ -25,6 +25,10 @@ for a message that was sent.
 **Rejected.** Storing transcripts "encrypted, for safety"; storing them behind an admin switch —
 either way the data exists and can be read out.
 
+**Superseded by D21** — the owner decided on 2026-10-19 that transcripts may be kept: off by default,
+owner-only, and configured by hand. The reasoning behind this entry still stands, which is why the
+archive is off until someone deliberately turns it on.
+
 ## D2. Anonymous identity: httpOnly cookie, `sha256(token)` in the database, public ID is not a secret
 
 **Context.** There is no sign-up, so the identity is created on first use — and must survive reloads
@@ -49,7 +53,8 @@ someone who does not fit, and matching nobody at all and never saying why.
 **Decision.** A filter is satisfied only by a *declared* value: silence never satisfies a filter. Both
 sides must accept each other (`preferencesFit` + `mutuallyCompatible` in `packages/shared`). Age is
 stored as a birth year and compared to the current year; places are compared as normalized free text
-(trim, case-fold, collapse spaces, ё→е) with no geocoding; the age filter floors at 18.
+(trim, case-fold, collapse spaces, ё→е) with no geocoding; the age filter floors at 18 (superseded by
+D20: the bounds are technical, 0–120, and impose no policy).
 
 **Consequences.** A user who declares nothing is eligible for unfiltered searches but invisible to
 everyone's filters — which is the honest reading of "I did not say". Filter arithmetic is a pure
@@ -295,3 +300,44 @@ verified (there is no registration and no document check). This is now a deliber
 recorded in `docs/PRODUCT_SPEC.md` (§ «Противоречия», п. 2) and stated plainly in `docs/SECURITY.md`
 §14. Nothing in the code pretends otherwise; if an age gate or a minors mode is wanted later, that is a
 new decision rather than a bug fix.
+
+## D21. Chat archives: off by default, owner-only, and decided by hand (reverses D1)
+
+**Context.** D1 rejected storing transcripts because a promise of privacy is only credible while the
+data does not exist. The owner — the person who operates the service — has decided he wants to be able
+to keep conversations: for everyone, for some users by parameters (age, gender, city, …), or for
+individually chosen users; and to decide by hand whether text or attachments are kept and for how
+long. He also decided that users must not be told, and that the sentences promising the opposite must
+be removed from the interface.
+
+**Decision.** The archive is a separate subsystem (`apps/api/src/archive`, the `ArchivePolicy`,
+`ArchiveSubject`, `ChatArchive` and `ArchivedMessage` tables) and is **off** until the owner switches
+it on. The policy is data, edited at `/admin`, and every part of it is bounded:
+- **scope** — everyone, declared parameters (gender, age range, cities, regions, languages), or an
+  explicit list of User IDs;
+- **content** — message text and, for the day attachments exist, which attachment kinds (`storeMedia`
+  is inert today because nothing in the product produces an attachment);
+- **retention** — `retentionDays`, `0` meaning "keep until the owner deletes it", enforced by the
+  maintenance sweep and by an explicit "delete expired now" action;
+- **either participant in scope is enough**, because the owner selects people and a selected person's
+  conversation cannot be half-recorded.
+The owner authenticates with a key (`ADMIN_TOKEN`, at least 32 characters, environment only) entered
+once at `/admin` and exchanged for an `HttpOnly`, `SameSite=Strict` cookie. With no key configured the
+admin routes do not exist (404), so an installation that never opts in cannot be attacked through a
+surface it never built. The five user-facing sentences promising "переписка не сохраняется" were
+deleted rather than reworded: the product now says nothing about storage.
+
+**Consequences.** The privacy guarantee is now *conditional on an owner action*, and the documentation
+says so everywhere instead of repeating the old promise. A stored transcript is plaintext in
+PostgreSQL, readable by anyone who can read the database or the key: the owner surface is a high-value
+target, and `docs/SECURITY.md` §13 lists exactly what is and is not done about it. `persistence.test.ts`
+now enforces the **default** (nothing stored) at the database level, and `archive.test.ts` proves the
+opt-in path end to end, including that switching the switch off stops recording immediately. Existing
+conversations are never retroactively archived, and switching off does not delete what is already kept
+(only retention or an explicit deletion does).
+
+**Rejected.** Storing everything silently with no off switch (no way to honour D1's intent);
+per-user consent prompts (the owner explicitly asked that users not be told); a separate admin login
+and password (an account, a reset flow and a second identity model for a product that has none — a key
+is enough for one operator); encrypting the archive with a key held by the same process (a false sense
+of protection: the process must decrypt it to serve the owner).

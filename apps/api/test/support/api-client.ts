@@ -34,7 +34,7 @@ export interface HttpResult<T> {
 }
 
 export interface HttpOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   cookie?: string;
   body?: unknown;
   origin?: string;

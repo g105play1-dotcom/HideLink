@@ -107,12 +107,16 @@ WebSocket upgrades must pass through untouched — Socket.IO depends on them.
 ## 5. Before announcing the address
 
 - [ ] Backups: a nightly `pg_dump` to a different machine, **and one restored by hand** to prove it
-      works. Nothing important lives in the database (no transcripts), but identities, blocks and
-      reports do.
+      works. Identities, blocks and reports live in the database; **if the owner archive is enabled,
+      the stored transcripts do too**, and then a backup inherits every risk listed in
+      `docs/SECURITY.md` §13 — an encrypted volume and a retention policy for dumps become mandatory,
+      not optional.
 - [ ] Monitoring: uptime of `GET /api/v1/health/ready`, process restarts, and an alert that reaches
       a person.
 - [ ] Log retention and a place to read them (the API logs a correlation id per failed request).
 - [ ] A decision on `ABUSE_HASH_SALT` (see `docs/SECURITY.md`).
+- [ ] If the archive will be used: generate `ADMIN_TOKEN`, keep it out of the repository, and decide
+      who besides the owner may read the database (see `docs/SECURITY.md` §13).
 - [ ] A rehearsal of the report triage flow: what happens when a report arrives at 02:00?
 - [ ] A load test that establishes how many concurrent chats one process holds, so the next step is
       a measurement rather than a guess.

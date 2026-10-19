@@ -31,6 +31,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   INCOMING_REQUESTS_DISABLED: 'Этот пользователь не принимает заявки.',
   BLOCKED: 'Общение с этим пользователем невозможно.',
   UNSUPPORTED_EVENT: 'Неподдерживаемое событие. Обновите страницу.',
+  ADMIN_AUTH_REQUIRED: 'Неверный ключ владельца.',
   FORBIDDEN_ORIGIN: 'Этот источник не может подключиться.',
   ROUTE_NOT_FOUND: 'Такого адреса на сервере нет. Обновите страницу.',
   PAYLOAD_TOO_LARGE: 'Запрос слишком большой.',

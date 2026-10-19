@@ -36,7 +36,7 @@ function isErrorCode(value: string | undefined): value is ErrorCode {
 }
 
 export interface ApiRequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omit for bodyless requests. */
   json?: unknown;
   /** Abort after this many milliseconds. */

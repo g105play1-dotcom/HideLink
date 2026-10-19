@@ -82,6 +82,8 @@ function defaultMessage(code: ErrorCode): string {
       return 'Communication with this user is not possible.';
     case ErrorCode.UNSUPPORTED_EVENT:
       return 'Unsupported event.';
+    case ErrorCode.ADMIN_AUTH_REQUIRED:
+      return 'The owner key is required for this endpoint.';
     case ErrorCode.FORBIDDEN_ORIGIN:
       return 'This origin is not allowed to connect.';
     case ErrorCode.ROUTE_NOT_FOUND:
@@ -103,6 +105,7 @@ function defaultStatus(code: ErrorCode): number {
       return 400;
     case ErrorCode.IDENTITY_REQUIRED:
     case ErrorCode.IDENTITY_NOT_FOUND:
+    case ErrorCode.ADMIN_AUTH_REQUIRED:
       return 401;
     case ErrorCode.FORBIDDEN_ORIGIN:
     case ErrorCode.IDENTITY_BANNED:

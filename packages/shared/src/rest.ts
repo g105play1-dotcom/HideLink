@@ -1,4 +1,5 @@
-import type { IncomingRequestPolicy } from './limits.js';
+import type { ArchivePolicy } from './archive.js';
+import type { ChatKind, IncomingRequestPolicy } from './limits.js';
 import type { DeclaredProfile, SearchPreferences } from './preferences.js';
 
 /**
@@ -66,3 +67,69 @@ export interface BlockedUserView {
 export interface BlockListResponse {
   blocks: BlockedUserView[];
 }
+
+// -----------------------------------------------------------------------------
+// Owner (admin) surface
+// -----------------------------------------------------------------------------
+//
+// Returned only by the admin endpoints, which are reachable only with the owner's key
+// (see docs/SECURITY.md). Shared with the web app for the same reason as every other
+// view: the browser must not re-declare the shape by hand, or the two drift silently.
+
+/** Whether the owner surface exists at all, i.e. whether `ADMIN_TOKEN` is configured. */
+export interface AdminStatusView {
+  available: boolean;
+}
+
+/** One identity as the owner sees it. Deliberately minimal: an ID and a date. */
+export interface AdminIdentityView {
+  publicId: string;
+  createdAt: string;
+}
+
+export interface AdminIdentityListResponse {
+  identities: AdminIdentityView[];
+}
+
+/** One archived conversation, without its messages. */
+export interface ArchivedChatSummaryView {
+  chatId: string;
+  kind: ChatKind;
+  startedAt: string;
+  endedAt: string | null;
+  endReason: string | null;
+  /** Messages exchanged, whether or not the policy stored their text. */
+  messageCount: number;
+  createdAt: string;
+  /** `null` means "kept until the owner deletes it". */
+  expiresAt: string | null;
+  participants: Array<{ publicId: string; role: 'a' | 'b' }>;
+}
+
+export interface ArchiveListResponse {
+  archives: ArchivedChatSummaryView[];
+}
+
+/** One stored message of an archived conversation. */
+export interface ArchivedMessageView {
+  seq: number;
+  senderPublicId: string;
+  /** `null` when the policy stores media only, which nothing can produce yet. */
+  text: string | null;
+  mediaKind: string | null;
+  sentAt: string;
+}
+
+export interface ArchivedChatView {
+  summary: ArchivedChatSummaryView;
+  messages: ArchivedMessageView[];
+}
+
+/** How much a deletion removed. Messages are counted so the result is not misleading. */
+export interface ArchiveDeletionResponse {
+  deletedArchives: number;
+  deletedMessages: number;
+}
+
+/** The policy as returned by the admin endpoints. */
+export type ArchivePolicyView = ArchivePolicy;

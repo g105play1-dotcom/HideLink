@@ -13,6 +13,7 @@ import {
 import type { SendRequestResult } from '@anonlink/protocol';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
+import { ArchiveService } from '../archive/archive.service.js';
 import { AppError } from '../common/app-error.js';
 import { newChatId, newMessageId, newRequestId } from '../common/ids.js';
 import { log } from '../common/logger.js';
@@ -83,6 +84,7 @@ export class ChatService implements OnApplicationShutdown {
     private readonly directory: DirectoryService,
     private readonly presence: PresenceService,
     private readonly moderation: ModerationService,
+    private readonly archive: ArchiveService,
     private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -247,6 +249,11 @@ export class ChatService implements OnApplicationShutdown {
     // A replayed message is acknowledged but not broadcast again, so a retry after
     // a flaky connection cannot produce a duplicate bubble on the peer's screen.
     if (!duplicate) this.bus.emit({ type: 'chat.message', chat, message });
+
+    // The archive, when the owner selected this conversation, gets the same server-side
+    // copy that the peers do — never the client's input. Fire-and-forget and ordered per
+    // chat, so a slow database can never delay or fail a message.
+    if (!duplicate && chat.archived) this.trackWrite(this.archive.recordMessage(chat, message));
 
     return { messageId: message.messageId, sentAt: message.sentAt };
   }
@@ -785,6 +792,14 @@ export class ChatService implements OnApplicationShutdown {
     this.matching.cancel(params.participantAId);
     this.matching.cancel(params.participantBId);
 
+    // Decided here, synchronously, because it is part of creating the chat: everything
+    // needed is already in the directory cache. See `CreateChatParams.archived`.
+    const archived = this.archive.shouldArchive(
+      params.participantAId,
+      params.participantBId,
+      startedAt,
+    );
+
     const chat = this.registry.create({
       chatId,
       kind: params.kind,
@@ -792,6 +807,7 @@ export class ChatService implements OnApplicationShutdown {
       participantBId: params.participantBId,
       initiatorId: params.initiatorId,
       startedAt,
+      archived,
       ...(params.publicIdByUser ? { publicIdByUser: params.publicIdByUser } : {}),
     });
 

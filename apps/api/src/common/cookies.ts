@@ -10,6 +10,16 @@
 export const SESSION_COOKIE_NAME = 'anonlink_session';
 
 /**
+ * The owner's admin cookie.
+ *
+ * Holds the owner key itself, but only after it has been sent once over the API: the
+ * browser's JavaScript never has to keep the secret, and an `HttpOnly` cookie cannot be
+ * read by a script. `SameSite=Strict` keeps it off cross-site requests, on top of the
+ * origin allow-list every state-changing request already passes through.
+ */
+export const ADMIN_COOKIE_NAME = 'anonlink_admin';
+
+/**
  * Parses a `Cookie` header into a plain object.
  *
  * Later duplicates win, matching browser behaviour for the same name.

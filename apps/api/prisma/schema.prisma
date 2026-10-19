@@ -5,10 +5,14 @@
 //
 //  1. NO personal data. There is no email, phone, name or password column
 //     anywhere, because AnonLink never asks for them.
-//  2. NO message bodies. Chat text lives only in the API process's memory while
-//     a chat is active. The single, explicit exception is the `messageSnapshot`
-//     on a `Report`, which exists so a human can act on a complaint; it carries
-//     a retention deadline (`expiresAt`) and is deleted by the maintenance job.
+//  2. Message bodies exist in exactly two places, and both are deliberate:
+//       - `Report.messageSnapshot`, so a human can act on a complaint;
+//       - `ArchivedMessage`, only when the owner has switched archiving on (see
+//         `ArchivePolicy`). It is off by default, owner-only, and the owner chooses
+//         who, what and for how long. See docs/DECISIONS.md D21 and docs/SECURITY.md.
+//     Outside those two, chat text lives only in the API process's memory while a
+//     chat is active, and both stored forms carry a retention deadline
+//     (`expiresAt`) that the maintenance job enforces.
 //  3. Identifiers that could be used to correlate a person (`ipHash`,
 //     `userAgentHash`) are stored only as salted SHA-256 hashes, and are only
 //     written for abuse investigation.
@@ -134,6 +138,7 @@ model Identity {
   blocksCreated  Block[]       @relation("BlockCreator")
   blocksReceived Block[]       @relation("BlockTarget")
   securityEvents SecurityEvent[]
+  archiveSubjects ArchiveSubject[]
 
   @@index([lastSeenAt])
   @@index([bannedAt])
@@ -202,6 +207,8 @@ model ChatSession {
   messageCount Int @default(0)
 
   reports Report[]
+  /// Present only when the owner's archive policy selected this chat. See docs/SECURITY.md.
+  archive ChatArchive?
 
   @@index([participantAId, status])
   @@index([participantBId, status])
@@ -290,4 +297,111 @@ model SecurityEvent {
   @@index([type, createdAt])
   @@index([identityId, createdAt])
   @@index([expiresAt])
+}
+
+// -----------------------------------------------------------------------------
+// Chat archives (owner-only, off by default)
+// -----------------------------------------------------------------------------
+
+/// Who an archive covers. `criteria` matches the declared attributes below;
+/// `selected` matches the User IDs listed in `ArchiveSubject`.
+enum ArchiveAudience {
+  everyone
+  criteria
+  selected
+}
+
+/// The owner's archive policy. Exactly one row, with the fixed id `default`.
+///
+/// Off by default: an installation whose owner never touches this table stores no
+/// transcripts at all. Every field is meant to be set by hand from the admin surface —
+/// there is no automatic selection. See docs/PRODUCT_SPEC.md §20 and D21.
+model ArchivePolicy {
+  id       String          @id @default("default") @db.VarChar(16)
+  enabled  Boolean         @default(false)
+  audience ArchiveAudience @default(everyone)
+
+  /// Criteria in force when `audience = criteria`. An empty list means "no constraint";
+  /// every non-empty constraint must hold, exactly like a search filter. The negative
+  /// case is deliberate: a person who never declared an attribute is *not* in scope.
+  genders   String[] @default([])
+  ageMin    Int?
+  ageMax    Int?
+  cities    String[] @default([])
+  regions   String[] @default([])
+  languages String[] @default([])
+
+  /// Whether message text is kept.
+  storeText Boolean @default(true)
+  /// Attachment kinds to keep. Inert until AnonLink can send attachments at all.
+  storeMedia String[] @default([])
+  /// Days an archive is kept; `0` means "until the owner deletes it".
+  retentionDays Int @default(90)
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  subjects ArchiveSubject[]
+}
+
+/// A User ID the owner selected one by one, used when `audience = selected`.
+model ArchiveSubject {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  policyId   String   @default("default") @db.VarChar(16)
+  identityId String   @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  policy   ArchivePolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  identity Identity      @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, identityId])
+  @@index([identityId])
+}
+
+/// The stored transcript of one chat.
+///
+/// Created lazily with the first stored message, so a chat that stored nothing leaves no
+/// row. `expiresAt` is null when the policy says "keep until deleted"; otherwise the
+/// maintenance sweep removes the archive and, by cascade, every message in it.
+model ChatArchive {
+  id     String @id @default(uuid(7)) @db.Uuid
+  chatId String @unique @db.Uuid
+
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  /// Retention deadline enforced by the maintenance job.
+  expiresAt DateTime? @db.Timestamptz(3)
+
+  messageCount Int @default(0)
+
+  chat     ChatSession       @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  messages ArchivedMessage[]
+
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+/// One stored message. Read only through the owner's admin surface.
+///
+/// `senderId` deliberately has no foreign key: an archive is a record of what happened,
+/// and it must not be rewritten or removed by anything that happens to an identity row.
+model ArchivedMessage {
+  id        String @id @default(uuid(7)) @db.Uuid
+  archiveId String @db.Uuid
+
+  /// Who wrote it, so the transcript can say who said what.
+  senderId String @db.Uuid
+
+  /// Message text, present only when the policy stores text.
+  text String? @db.VarChar(4000)
+
+  /// Attachment slot. Both stay null until the product can send attachments.
+  mediaKind String? @db.VarChar(24)
+  mediaRef  String? @db.VarChar(512)
+
+  sentAt DateTime @db.Timestamptz(3)
+  /// Position within the chat, assigned by the server as messages are stored.
+  seq    Int
+
+  archive ChatArchive @relation(fields: [archiveId], references: [id], onDelete: Cascade)
+
+  @@index([archiveId, seq])
 }

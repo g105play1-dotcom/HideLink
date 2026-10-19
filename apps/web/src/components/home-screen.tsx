@@ -6,7 +6,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  ShieldCheck,
   TriangleAlert,
   UserSearch,
 } from 'lucide-react';
@@ -160,14 +159,6 @@ export function HomeScreen() {
           </>
         )}
       </main>
-
-      <footer className="flex items-start gap-2 text-xs text-muted-foreground">
-        <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        <p>
-          Переписка не сохраняется в базе данных: она живёт в памяти сервера и исчезает, когда чат
-          завершён. Постоянно хранятся только ваш User ID, настройки, блокировки и жалобы.
-        </p>
-      </footer>
 
       <IncomingRequestDialog />
       <ReportDialog open={reporting} onClose={() => setReporting(false)} />

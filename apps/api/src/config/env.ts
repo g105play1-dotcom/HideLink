@@ -110,6 +110,23 @@ const envSchema = z.object({
 
   /** Trust the first `X-Forwarded-For` hop when running behind a reverse proxy. */
   TRUST_PROXY: booleanString(false),
+
+  // --- Owner (admin) surface ------------------------------------------------
+  /**
+   * The secret that opens the owner's admin surface (`/api/v1/admin/*`), which is how
+   * the archive of conversations is read and how the archive policy is set.
+   *
+   * Unset (the default) means the surface does not exist at all: every admin route
+   * answers as if it had never been mounted. That is the safe default — archiving is
+   * off anyway, so there is nothing to read — and it means an operator who never wants
+   * an admin surface cannot create one by accident. Set it to a long random string
+   * (at least 32 characters) before reading archives. See docs/SECURITY.md.
+   */
+  ADMIN_TOKEN: z
+    .string()
+    .min(32, 'ADMIN_TOKEN must be at least 32 characters when set')
+    .optional()
+    .transform((value) => (value && value.length > 0 ? value : undefined)),
 });
 
 export type AppConfig = Readonly<

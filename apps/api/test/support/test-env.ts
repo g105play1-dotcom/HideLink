@@ -105,6 +105,11 @@ export const TEST_ENV: Readonly<Record<string, string>> = Object.freeze({
   SESSION_RETENTION_DAYS: '7',
   SECURITY_EVENT_RETENTION_DAYS: '90',
 
+  // The owner key the admin tests present. Pinned here — not taken from the developer's
+  // `.env` — so the suite can never depend on, or accidentally print, a real secret. It
+  // satisfies the schema's 32-character minimum, which is the point of that minimum.
+  ADMIN_TOKEN: 'test-owner-key-not-a-real-secret-0001',
+
   TRUST_PROXY: 'false',
 });
 

@@ -93,9 +93,12 @@ or the request/event surface.
 - `apps/api/test/global-setup.ts` runs `prisma migrate deploy` against the `*_test` database.
 - **Never wipe the test database.** Tests must be self-contained: use a `randomUUID()` needle for any
   global text search, and clean up queue/chat state you created (see §6).
-- Chat transcripts are **not** stored. PostgreSQL holds identities, sessions, blocks, reports,
-  security events, and the voluntary profile/filters. `apps/api/test/persistence.test.ts` enforces
-  this by reading the database directly — do not weaken it.
+- Chat transcripts are **not** stored by default. PostgreSQL holds identities, sessions, blocks,
+  reports, security events, and the voluntary profile/filters. The **owner** may switch on an archive
+  (`docs/DECISIONS.md` D21) that stores whole conversations for the people he selects; it is off until
+  he does, and users are told nothing about it. `apps/api/test/persistence.test.ts` enforces the default
+  (and fails if it finds a non-empty archive) — do not weaken it; `apps/api/test/archive.test.ts` covers
+  the opt-in path and must leave the switch off and the archive empty in `afterEach`.
 
 ## 6. Testing rules
 

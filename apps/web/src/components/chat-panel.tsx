@@ -242,7 +242,7 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
           </div>
 
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>Текстовые сообщения. Переписка не сохраняется после завершения чата.</span>
+            <span>Текстовые сообщения.</span>
             {/* Only shown near the limit, so it is a warning rather than noise. */}
             {draft.length > maxLength * 0.8 ? (
               <span

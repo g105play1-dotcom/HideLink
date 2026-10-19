@@ -83,7 +83,7 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
           />
           <p className="text-xs text-muted-foreground">
             Вместе с жалобой сохраняется текст последнего сообщения — это то, что проверяет
-            модерация. Всё остальное не сохраняется.
+            модерация.
           </p>
         </div>
 

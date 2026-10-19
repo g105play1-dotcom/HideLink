@@ -16,10 +16,13 @@ import {
  * What actually lands in PostgreSQL.
  *
  * The API runs in its own process, so these tests read the database directly — that is
- * the only way to verify the privacy claim ("no transcripts are kept") rather than
- * trusting the code that makes it. The most important test in this file is the one
+ * the only way to verify the privacy claim ("by default, no transcripts are kept") rather
+ * than trusting the code that makes it. The most important test in this file is the one
  * that searches *every* text column in the schema for a message that was sent.
- */
+ *
+ * This file describes a **default installation**: archiving is off, so nothing is stored.
+ * The owner can switch it on (`apps/api/test/archive.test.ts` covers that path), and the
+ * precondition below fails loudly if a previous run left it on. */
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
@@ -36,6 +39,11 @@ beforeAll(async () => {
   // Fail loudly rather than silently asserting about a development database.
   const { rows } = await pool.query<{ current_database: string }>('SELECT current_database()');
   expect(rows[0]?.current_database).toMatch(/_test$/);
+
+  // And rather than asserting about an installation whose owner left archiving on: every
+  // "the text is nowhere" claim below is only true while the archive is empty.
+  const archives = await pool.query<{ count: string }>('SELECT count(*) FROM "ChatArchive"');
+  expect(Number(archives.rows[0]?.count ?? '0')).toBe(0);
 });
 
 afterAll(async () => {
@@ -132,7 +140,8 @@ describe('chat lifecycle persistence', () => {
     expect(ended.messageCount).toBe(3);
     expect(ended.endedAt).not.toBeNull();
 
-    // The counter is a number; the text itself is nowhere.
+    // The counter is a number; the text itself is nowhere. Archiving is off in this suite
+    // (the owner's archive has its own file), which is the state a new installation is in.
     expect(await findTextSomewhere(secret)).toEqual([]);
     expect(await findTextSomewhere('второе')).toEqual([]);
   });
@@ -210,7 +219,8 @@ describe('reports', () => {
       { location: 'Report.messageSnapshot', count: 1 },
     ]);
 
-    // A message that was never reported is nowhere at all.
+    // A message that was never reported is nowhere at all: the archive is off, and the
+    // report stores one snapshot, never the conversation around it.
     expect(await findTextSomewhere(harmlessText)).toEqual([]);
   });
 });

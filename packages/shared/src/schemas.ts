@@ -137,3 +137,43 @@ export type ConnectRequestInput = z.infer<typeof connectRequestSchema>;
 export type ConnectRespondInput = z.infer<typeof connectRespondSchema>;
 export type ReportInput = z.infer<typeof reportSchema>;
 export type SettingsInput = SettingsUpdate;
+
+// -----------------------------------------------------------------------------
+// Owner (admin) surface
+// -----------------------------------------------------------------------------
+
+/**
+ * REST: `POST /api/v1/admin/session`.
+ *
+ * The owner's key, sent once, in exchange for an HttpOnly cookie. Deliberately a plain
+ * bounded string rather than the User ID schema: it is not a User ID, and normalising it
+ * the way an ID is normalised would silently mangle a legitimate secret.
+ */
+export const adminSessionSchema = z.object({ token: z.string().min(1).max(512) }).strict();
+
+/** REST: `GET /api/v1/admin/identities?q=` — find a User ID, or find by prefix. */
+export const adminIdentityQuerySchema = z
+  .object({ q: z.string().trim().max(64).optional() })
+  .strict();
+
+/** REST: `GET /api/v1/admin/archives?limit=` */
+export const archiveListQuerySchema = z
+  .object({ limit: z.coerce.number().int().min(1).max(200).optional() })
+  .strict();
+
+/** REST: `GET` / `DELETE /api/v1/admin/archives/:chatId` */
+export const archiveParamsSchema = z.object({ chatId: chatIdSchema }).strict();
+
+/**
+ * REST: `POST /api/v1/admin/archives/delete-all`.
+ *
+ * Deleting the whole archive is irreversible, so the request has to say so explicitly.
+ * A stray request (a retried one, a prefetched link) can then never wipe it.
+ */
+export const adminConfirmSchema = z.object({ confirm: z.literal(true) }).strict();
+
+export type AdminSessionInput = z.infer<typeof adminSessionSchema>;
+export type AdminIdentityQuery = z.infer<typeof adminIdentityQuerySchema>;
+export type ArchiveListQuery = z.infer<typeof archiveListQuerySchema>;
+export type ArchiveParams = z.infer<typeof archiveParamsSchema>;
+export type AdminConfirmInput = z.infer<typeof adminConfirmSchema>;

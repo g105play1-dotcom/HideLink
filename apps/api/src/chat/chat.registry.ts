@@ -6,8 +6,10 @@ import { peerAlias } from '../common/ids.js';
 import { log } from '../common/logger.js';
 
 /**
- * A message as it exists in server memory. Never written to the database except
- * as a report snapshot. See docs/SECURITY.md.
+ * A message as it exists in server memory.
+ *
+ * Written to the database only as a report snapshot, or into the owner's archive when the
+ * owner has switched archiving on for this conversation. See docs/SECURITY.md.
  */
 export interface StoredMessage {
   readonly messageId: string;
@@ -33,6 +35,16 @@ export interface CreateChatParams {
    * User ID in an anonymous conversation — the data simply is not there to leak.
    */
   publicIdByUser?: ReadonlyMap<string, string>;
+  /**
+   * Whether this conversation is in the owner's archive scope.
+   *
+   * Decided once, synchronously, when the chat is created: scope is a property of the
+   * moment the conversation started. Re-deciding it per message would let a policy edit
+   * switch recording on or off halfway through a conversation, which is impossible to
+   * explain to anyone. Whether the write actually happens is still checked per message,
+   * so switching the archive off stops it immediately.
+   */
+  archived?: boolean;
 }
 
 /**
@@ -51,6 +63,8 @@ export class ChatRecord {
   readonly participantBId: string;
   readonly initiatorId: string;
   readonly startedAt: Date;
+  /** Set when the owner's archive policy selected this conversation. */
+  readonly archived: boolean;
 
   status: 'active' | 'ended' = 'active';
   endedAt: Date | null = null;
@@ -73,6 +87,7 @@ export class ChatRecord {
     this.participantBId = params.participantBId;
     this.initiatorId = params.initiatorId;
     this.startedAt = params.startedAt;
+    this.archived = params.archived ?? false;
 
     // Each participant gets an independent random alias for the other, so the
     // same person is unlinkable across two different chats.
@@ -159,11 +174,12 @@ export class ChatRecord {
  *
  * ## Why this is not in the database
  *
- * AnonLink promises that a conversation is not retained. Keeping the transcript
- * only in the process that serves it is the simplest way to make that promise
- * structurally true: there is no retained copy to leak, subpoena or misconfigure.
- * The database stores one lifecycle row per chat (participants, start/end times,
- * end reason, message count) and nothing else.
+ * A conversation is normally retained nowhere. Keeping the transcript only in the process
+ * that serves it is the simplest way to make that true: there is no copy to leak,
+ * subpoena or misconfigure. The database stores one lifecycle row per chat (participants,
+ * start/end times, end reason, message count) and nothing else — unless the owner has
+ * switched the archive on for this conversation, which is the one deliberate exception
+ * (see `ArchiveService` and docs/DECISIONS.md D21).
  *
  * ## Concurrency
  *

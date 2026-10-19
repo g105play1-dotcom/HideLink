@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ArchiveModule } from '../archive/archive.module.js';
 import { ModerationModule } from '../moderation/moderation.module.js';
 import { ChatController } from './chat.controller.js';
 import { MatchingService } from './chat.matching.js';
@@ -13,9 +14,13 @@ import { ChatService } from './chat.service.js';
  * The three storage services (`ChatRegistryService`, `MatchingService`,
  * `ConnectionRequestService`) hold the ephemeral state; `ChatService` is the only
  * thing that mutates it, which is what keeps the invariants in one file.
+ *
+ * `ArchiveModule` is imported for one reason: `ChatService` asks it, synchronously and
+ * at chat start, whether this conversation is in the owner's archive scope, and hands it
+ * each message afterwards. The archive never calls back, so the dependency is acyclic.
  */
 @Module({
-  imports: [ModerationModule],
+  imports: [ModerationModule, ArchiveModule],
   controllers: [ChatController],
   providers: [ChatRegistryService, MatchingService, ConnectionRequestService, ChatService],
   exports: [ChatService],

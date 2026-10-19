@@ -178,7 +178,6 @@ export function SearchPanel({ onOpenSettings }: { onOpenSettings?: () => void })
         ) : null}
 
         <ul className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          <li>• Переписка хранится только в памяти и не сохраняется после завершения чата.</li>
           <li>• Можно завершить чат в любой момент или сразу перейти к следующему.</li>
           <li>• Собеседника можно заблокировать или отправить на него жалобу.</li>
         </ul>

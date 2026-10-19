@@ -14,7 +14,7 @@ The companion documents are `docs/SECURITY.md` (threat model, what is refused, w
 
 ```
 apps/api            NestJS 12 (Express + Socket.IO): REST, realtime gateway, matchmaking,
-                    chats, moderation, Prisma 7 access
+                    chats, moderation, the owner archive, Prisma 7 access
 apps/web            Next.js 16 App Router (React 19, Zustand, TanStack Query, Tailwind 4)
 packages/shared     domain rules: filters/preferences, relaxation, limits, id formats,
                     validation schemas, error codes, REST view types
@@ -29,6 +29,7 @@ What each package owns:
 - `packages/shared/src/preferences.ts` — the filter vocabulary, the strict/mutual predicate (`preferencesFit`, `mutuallyCompatible`) and the relaxation ladder (`RELAXABLE_CRITERIA`, `activeRelaxationOrder`, `relaxBySteps`, `relaxationStage`).
 - `packages/shared/src/ids.ts` — the public User ID format (`AL` + 12 Crockford Base32 chars; `generatePublicId`, `normalizePublicId`, `isValidPublicId`).
 - `packages/shared/src/limits.ts` — shared numbers (`CHAT_MEMORY_MESSAGE_LIMIT`, `MATCH_TICKET_TTL_MS`, `CONNECT_REQUEST_TTL_MS`, `SESSION_TOKEN_BYTES`, `REPORT_REASONS`, end reasons).
+- `packages/shared/src/archive.ts` — the archive policy model, its schema-level cross-field rules, and `archiveSubjectMatches` / `shouldArchiveChat`, the same predicate the API applies (the browser never decides).
 - `packages/shared/src/errors.ts`, `schemas.ts`, `rest.ts` — the `ErrorCode` enum, the Zod schemas used by both ends, and the REST view types (`SessionView`, `UserLookupView`, …).
 - `packages/protocol/src/events.ts`, `payloads.ts` — `PROTOCOL_VERSION`, the client/server event maps, `AckResult<T>` and every payload, plus `SocketData`.
 
@@ -161,7 +162,7 @@ A second instance would change this materially: each process would have its own 
 
 ## 6. Persistence
 
-PostgreSQL is the only durable store. It holds identity and session metadata, moderation state and retention-bound forensic events — and, deliberately, no chat transcript. The schema is `apps/api/prisma/schema.prisma`.
+PostgreSQL is the only durable store. It holds identity and session metadata, moderation state and retention-bound forensic events — and no chat transcript, unless the owner has switched the archive on (`docs/DECISIONS.md` D21). The schema is `apps/api/prisma/schema.prisma`.
 
 | Model | Purpose | Notable fields |
 | --- | --- | --- |
@@ -171,14 +172,20 @@ PostgreSQL is the only durable store. It holds identity and session metadata, mo
 | `Block` | one-directional block | `blockerId`, `blockedId`, unique together |
 | `Report` | abuse report | `reason`, `details`, `messageId`, `messageSnapshot`, `status`, `expiresAt` |
 | `SecurityEvent` | low-frequency, high-signal events | `type`, `identityId`, `targetId`, `expiresAt` |
+| `ArchivePolicy` | the owner's single archive setting | `enabled`, `audience`, criteria columns, `storeText`, `storeMedia`, `retentionDays` |
+| `ArchiveSubject` | one explicitly selected User ID (audience `selected`) | `publicId`, unique |
+| `ChatArchive` | one archived conversation | `chatId`, `participantsAtStart`, `messageCount`, `expiresAt` |
+| `ArchivedMessage` | one stored message | `archiveId`, `seq`, `senderId`, `text`, inert `mediaKind`/`mediaRef`, `sentAt` |
 
-The brief lists five models; the schema actually has **six**, adding `ChatSession` (the lifecycle row above).
+The brief lists five models; the schema actually has **six** product models (adding `ChatSession`) plus **four** archive models that exist only for the owner's opt-in feature.
 
-**Deliberately not stored.** Chat transcripts live only in `ChatRecord.messages` in process memory, bounded by `CHAT_MEMORY_MESSAGE_LIMIT = 200` (`apps/api/src/chat/chat.registry.ts`); the only row content a message can reach is a `Report.messageSnapshot`, always copied from the server's own in-memory message and deleted on `expiresAt`. Pending direct requests live in memory for `CONNECT_REQUEST_TTL_MS = 60_000` (`apps/api/src/chat/chat.requests.ts`) and do not survive a restart. `ipHash`/`userAgentHash` are written only when `ABUSE_HASH_SALT` is set (default: unset), and rate-limit trips are never persisted (`docs/DECISIONS.md`, D7). `apps/api/test/persistence.test.ts` enforces the transcript claim by reading the database directly and searching every text column for a sent message.
+**Deliberately not stored.** Chat transcripts live only in `ChatRecord.messages` in process memory, bounded by `CHAT_MEMORY_MESSAGE_LIMIT = 200` (`apps/api/src/chat/chat.registry.ts`) — unless the owner's archive selected the chat, in which case the same message is also handed to `ArchiveService.recordMessage`. The only row content a message can otherwise reach is a `Report.messageSnapshot`, always copied from the server's own in-memory message and deleted on `expiresAt`. Pending direct requests live in memory for `CONNECT_REQUEST_TTL_MS = 60_000` (`apps/api/src/chat/chat.requests.ts`) and do not survive a restart. `ipHash`/`userAgentHash` are written only when `ABUSE_HASH_SALT` is set (default: unset), and rate-limit trips are never persisted (`docs/DECISIONS.md`, D7). `apps/api/test/persistence.test.ts` enforces the default by reading the database directly and searching every text column for a sent message; `apps/api/test/archive.test.ts` proves the opt-in path.
+
+**The archive seam.** The archive is a leaf: `chat/chat.service.ts` asks `ArchiveService.shouldArchive(participants)` **synchronously**, once, when the chat is created, and stores the answer on `ChatRecord.archived`. Messages are handed over after the dedup check (`trackWrite(archive.recordMessage(...))`), so a database failure can never delay or lose a message. The chat domain does not know the archive exists beyond that one call — the policy cache, the Prisma writes, the retention query and the owner's HTTP surface all live in `apps/api/src/archive/` (`archive.service.ts`, `admin.guard.ts`, `admin.controller.ts`, `admin-session.controller.ts`, `archive.module.ts`) and depend on nothing in `chat/`. The decision is re-read on every message rather than cached on the chat, which is what makes switching the switch off take effect immediately instead of at the next chat.
 
 **Prisma 7 specifics.** The `prisma-client` generator outputs to `apps/api/src/generated/prisma` (git-ignored, `@ts-nocheck`), and the client connects through `@prisma/adapter-pg` (`apps/api/src/prisma/prisma.service.ts`). The datasource URL is not loaded from `.env` automatically; the CLI config `apps/api/prisma7.config.ts` walks up to find the root `.env`, the same strategy the API uses in `apps/api/src/config/env.ts`.
 
-**Migrations are additive**: adding an optional or defaulted column is acceptable; dropping or rewriting one requires a written rollback plan (`AGENTS.md`). Two migrations are committed under `apps/api/prisma/migrations/`: `20261018000147_init` and `20261018023949_add_search_preferences`. The test database is prepared with `prisma migrate deploy` (`apps/api/test/global-setup.ts`).
+**Migrations are additive**: adding an optional or defaulted column is acceptable; dropping or rewriting one requires a written rollback plan (`AGENTS.md`). Three migrations are committed under `apps/api/prisma/migrations/`: `20261018000147_init`, `20261018023949_add_search_preferences` and `20261019064049_add_chat_archives` (four new tables, no change to any existing one). The test database is prepared with `prisma migrate deploy` (`apps/api/test/global-setup.ts`).
 
 **Retention** (`MaintenanceService.enforceRetention`) hard-deletes rows whose deadlines passed:
 
@@ -187,9 +194,10 @@ report.deleteMany        where expiresAt        < now
 securityEvent.deleteMany where expiresAt        < now
 session.deleteMany       where expiresAt < now - SESSION_RETENTION_DAYS
                             or revokedAt < now - SESSION_RETENTION_DAYS
+chatArchive.deleteMany   where expiresAt is not null and expiresAt < now   (cascades to messages)
 ```
 
-`Identity` rows are never deleted here: they hold a random ID and timestamps, and deleting one would cascade away the reports describing abuse it may have committed.
+`Identity` rows are never deleted here: they hold a random ID and timestamps, and deleting one would cascade away the reports describing abuse it may have committed. The archive's `expiresAt` is only ever set when the owner chose a non-zero `retentionDays`; the same query is reachable on demand as `POST /api/v1/admin/archives/delete-expired`, because the interval is zero in tests and the sweep is not otherwise callable.
 
 ---
 
@@ -224,6 +232,8 @@ interface ErrorPayload { code: ErrorCode; message: string; context?: string }
 
 **How a disconnect is rendered.** `ConnectionStatus` is `booting | connecting | connected | reconnecting | offline | rejected`, and `apps/web/src/components/connection-badge.tsx` maps each to a Russian label, variant and icon, announced via `aria-live="polite"`. Transport drops set `reconnecting` ("Соединение потеряно. Восстанавливаем…") and Socket.IO reconnects on its own; a server-initiated close retries a bounded number of times before `offline`; a refusal (`IDENTITY_BANNED`, `FORBIDDEN_ORIGIN`, `TOO_MANY_CONNECTIONS`) sets `rejected` and stops the loop. A *peer's* disconnect is separate: `chat:peer-away` / `chat:peer-back` toggle `peerAway` and append a system message, because disconnecting is not leaving.
 
+**The owner's page, outside the product.** `apps/web/src/app/admin/page.tsx` (server, `noindex`) renders `apps/web/src/components/admin-screen.tsx` (client). It is the one screen that does not go through the Zustand store or the singleton socket: it talks to the admin REST routes with `apiRequest` and holds its state in TanStack Query plus local `useState`. Nothing in the product links to it — users are told nothing about archiving — and its only credential is the `anonlink_admin` cookie the server sets. `admin-screen.tsx` mirrors the policy schema's cross-field rules so the owner sees *why* a save is refused instead of a generic error; the server re-validates everything.
+
 ---
 
 ## 9. Cross-cutting concerns
@@ -244,10 +254,11 @@ Everything here is **not built**. Each item names the exact file where the seam 
 
 - **Redis-backed queue / multiple instances.** The seam is the header comment of `apps/api/src/chat/chat.matching.ts`, which names the methods a Redis/Valkey implementation would reproduce (`enqueue`, `cancel`, `claimOrEnqueue`, `relaxationDue`, `sweep`) and suggests Lua or `WATCH`/`MULTI` for the claim step. Nothing outside that file assumes in-memory storage, but `PresenceService` (`apps/api/src/presence/presence.service.ts`), the per-process rate limiter and the process-local `AppEventBus` would *also* need shared implementations, and there is no seam for those. `/health/ready` reports `singleInstance: true` (`apps/api/src/health/health.controller.ts`) so the constraint is visible at runtime.
 - **Direct-request persistence across restarts.** `apps/api/src/chat/chat.requests.ts` keeps invitations in memory for 60 s by design; making them durable needs a mailbox and a notification model that do not exist.
-- **Media / attachments.** Not built, and there is **no dedicated code seam**. The only note is `docs/PRODUCT_SPEC.md` (message length and storage are not tied to text, described as "architecturally prepared" but explicitly not "almost done"). Implementation would be new work in `apps/api/src/chat/chat.registry.ts`, `packages/shared/src/schemas.ts` and `packages/protocol`.
-- **Moderation tooling.** The durability exists (`Report`, `SecurityEvent`, `ModerationService`'s `createReport`, `recordSecurityEvent` and an operator-only `ban()`), but there is **no admin API or UI** — `ban` is called from server code only, with no endpoint. A surface would be a new module alongside `apps/api/src/moderation/`.
+- **Media / attachments.** Not built, and there is **no dedicated code seam**. The only note is `docs/PRODUCT_SPEC.md` (message length and storage are not tied to text, described as "architecturally prepared" but explicitly not "almost done"). Implementation would be new work in `apps/api/src/chat/chat.registry.ts`, `packages/shared/src/schemas.ts` and `packages/protocol`. The archive's `storeMedia` flags and `ArchivedMessage.mediaKind`/`mediaRef` columns exist and are deliberately inert — they record nothing, because nothing produces an attachment yet.
+- **Moderation tooling.** The durability exists (`Report`, `SecurityEvent`, `ModerationService`'s `createReport`, `recordSecurityEvent` and an operator-only `ban()`), and the owner now has one HTTP surface (`apps/api/src/archive/`, `apps/api/src/moderation/` still has none) — but there is **no moderation console**: `ban` is called from server code only, with no endpoint. The archive page reads transcripts; it cannot ban, and it is not a general admin area. A surface would be a new module alongside `apps/api/src/moderation/`.
 - **Scaling, load testing, backups, monitoring, HTTPS.** None present. This is a single Node process with in-process matchmaking, chats and presence; that is the honest ceiling of the current design. `docs/PRODUCT_SPEC.md` §23 lists the same gaps (shared queue, shared presence, sticky connections or cross-process events).
-- **Minors guarantee.** There is none: age filters refuse bounds below 18 (`packages/shared/src/preferences.ts`), but a declared birth year is unverified, and `docs/DECISIONS.md` (D18) records the policy as deliberately undecided rather than faked.
+- **Minors guarantee.** There is none: age *filters* impose no floor (`packages/shared/src/preferences.ts`, `PROFILE_LIMITS.AGE_MIN = 0`), a declared birth year is unverified, and `docs/DECISIONS.md` (D18 → D20) records the policy as the owner's choice (no age restriction) rather than a guarantee.
+- **Archive encryption / key management.** The archive is plaintext in PostgreSQL, guarded only by `ADMIN_TOKEN` (`docs/DECISIONS.md` D21, `docs/SECURITY.md` §13). There is no encryption at rest, no key rotation and no second factor; nothing in `apps/api/src/archive/` assumes encryption, so adding it is new work rather than a seam.
 
 ---
 
@@ -256,7 +267,8 @@ Everything here is **not built**. Each item names the exact file where the seam 
 - **Strict, mutual filters and the ladder** — `packages/shared/src/preferences.ts`: `preferencesFit`, `mutuallyCompatible`, `RELAXABLE_CRITERIA`, `relaxBySteps`; exercised by `packages/shared/src/preferences.test.ts`.
 - **In-process queue + the Redis seam** — `apps/api/src/chat/chat.matching.ts`: the class comment ("Why an in-memory queue and not Redis") and `claimOrEnqueue`.
 - **Directory fails closed** — `apps/api/src/directory/directory.service.ts`: `sides` returns `null` for an unknown side; `isEligible` in `apps/api/src/chat/chat.service.ts` treats that as not eligible.
-- **No transcripts in the schema** — `apps/api/prisma/schema.prisma`: six models and no message-body column; `apps/api/test/persistence.test.ts` scans every text column for a sent message.
+- **No transcripts by default** — `apps/api/prisma/schema.prisma`: six product models and no message-body column outside the archive; `apps/api/test/persistence.test.ts` scans every text column for a sent message on a default installation.
+- **The archive is opt-in and owner-only** — `apps/api/src/archive/archive.service.ts` (`shouldArchive`, `recordMessage`), `admin.guard.ts` (404 when `ADMIN_TOKEN` is unset, 401 otherwise) and `apps/api/test/archive.test.ts`.
 - **Relaxation only from the maintenance sweep** — `apps/api/src/maintenance/maintenance.service.ts` (`runOnce` calls `chat.relax`) and `apps/api/src/chat/chat.service.ts` (`relax`); compare `apps/api/test/support/test-env.ts` (`MATCH_RELAX_AFTER_MS=0`) with `tests/e2e/env.ts` (`4000` / `2000` / `250`).
 - **HTTP guard order** — `apps/api/src/identity/request.guard.ts`: origin → identity → rate limit → authorisation, with `@Anonymous()` in `apps/api/src/identity/request-context.ts`.
 - **Realtime boundary** — `apps/api/src/realtime/chat.gateway.ts`: `guard()` (validation + ack shape) and `onAppEvent` (per-socket rendering); event names in `packages/protocol/src/events.ts`.

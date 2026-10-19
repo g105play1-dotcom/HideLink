@@ -25,24 +25,24 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 3 | **61** | pure unit |
+| `packages/shared` | 4 | **74** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 10 | **134** | 26 unit + 108 integration |
+| `apps/api` | 11 | **147** | 26 unit + 121 integration |
 | `tests/e2e` | 6 | **20** | browser, two independent contexts |
-| **Total** | **20** | **223** | |
+| **Total** | **22** | **249** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
-without a server; the eight integration files start a **real API process on port 3101** against the
+without a server; the nine integration files start a **real API process on port 3101** against the
 `*_test` database.
 
 **Last full run (2026-10-19, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `20 passed (1.7m)`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `20 passed (1.8m)`. The browser suite
 is not decoration — the run before it failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
 ## 3. Unit suites
 
-**`packages/shared` (61)** — the rules both ends depend on, so they are tested once, here:
+**`packages/shared` (74)** — the rules both ends depend on, so they are tested once, here:
 
 - `preferences.test.ts` (27) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
   folding (`Королёв` ≡ `  королев`), the relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`,
@@ -51,6 +51,10 @@ under §5.
   accepting look-alikes (`O`→`0`, `I`/`L`→`1`, case), `isValidPublicId` rejecting malformed input.
 - `schemas.test.ts` (16) — every Zod input contract, including the age-range `.refine`, unknown-field
   rejection, and the message-length ceiling.
+- `archive.test.ts` (13) — the owner's policy: `archivePolicySchema`'s cross-field rules (enabling
+  requires something to store; `criteria` requires at least one criterion; `selected` requires at
+  least one ID; `ageMin ≤ ageMax`), `archiveSubjectMatches` treating an undeclared attribute as no
+  match, and `shouldArchiveChat` selecting the whole chat when either participant matches.
 
 **`packages/protocol` (8)** — `PROTOCOL_VERSION` and the exact client/server event-name maps, so a
 renamed event cannot silently ship.
@@ -71,8 +75,9 @@ Each file below runs against the live process; the descriptions are the guarante
 | `matching.test.ts` | 8 | Two waiters paired into one chat, **no identity in two chats at once**, never matching itself from two sockets, peer User ID never leaked, cancel removes from queue, re-match after leave, disconnected identity dropped, unknown event answered |
 | `direct.test.ts` | 15 | Direct request delivery (sender ID disclosed because it is reciprocal), note length, unknown/self/malformed target, offline target, requests-off target, **blocked target refused without saying so**, blocked while in a chat, cancel on disconnect; accept (both IDs revealed), decline, wrong addressee, double answer, second-chat refusal |
 | `moderation.test.ts` | 9 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
-| `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events |
+| `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
 | `search-filters.test.ts` | 10 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user |
+| `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
 | `protocol.test.ts` | 10 | The nine client events are declared and each is routed to a handler |
 
 Two deliberate test-environment switches make these deterministic and are the reason some behaviours
@@ -132,19 +137,21 @@ server is actually applying" is a product requirement, not a detail.
 | 17 | No double assignment | `matching.test.ts` (server-level) |
 | 18 | Third party cannot join | `access.spec.ts` |
 | 19 | Filters really affect server matching | `search-filters.test.ts` (server) + `filters.spec.ts` |
-| 20 | Retention cleanup | **Not covered for retention.** The E2E stack runs the sweep and asserts widening; nothing asserts that anything is deleted. See §6. |
+| 20 | Retention cleanup | **Partly covered.** The E2E stack runs the sweep and asserts widening; nothing asserts that a report, session or security event is deleted. The **archive's** retention query *is* covered: `archive.test.ts` backdates one archive and calls the same `deleteExpired` the sweep calls. See §6. |
 
 ## 6. What is NOT covered
 
 Listed so that no reader, and no future contributor, mistakes "green" for "complete".
 
 1. **Retention / stale-state cleanup (brief scenario 20).** `MaintenanceService.runOnce` is the
-   enforcement point for report, session, security-event and queue deadlines. The integration suite
-   disables it (`MAINTENANCE_INTERVAL_MS=0`) so nothing races an assertion, and the E2E stack does run
-   it (250 ms) — but the only thing E2E asserts about it is that *widening* is announced. **No test
+   enforcement point for report, session, security-event, archive and queue deadlines. The integration
+   suite disables it (`MAINTENANCE_INTERVAL_MS=0`) so nothing races an assertion, and the E2E stack does
+   run it (250 ms) — but the only thing E2E asserts about it is that *widening* is announced. **No test
    asserts that a report, session or security event is actually deleted, and none calls `runOnce` by
    hand with a moved clock.** A test that advances a fake clock and asserts deletion is the single
-   most valuable missing test. COMPLIANCE §5.7 is marked accordingly.
+   most valuable missing test. The archive is the one exception: `archive.test.ts` backdates an archive
+   and calls `POST /admin/archives/delete-expired`, which runs the same `deleteExpired()` the sweep
+   runs — so the *query* is proved, though not the timer. COMPLIANCE §5.7 is marked accordingly.
 2. **Block/report in a browser.** The behaviour is enforced server-side and covered by integration
    tests, but no E2E journey clicks "Заблокировать"/"Пожаловаться" and then verifies the peer's
    screen. Only the negative (third party refused) is exercised in the browser.
@@ -169,6 +176,10 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
     exist here.
 13. **Web has no unit tests.** The Zustand store and the client state machine (`anonymous-client.ts`)
     are exercised only through E2E; there is no isolated test of their transitions.
+14. **The owner's `/admin` page has no automated test.** Its API is covered by `archive.test.ts`, but
+    no browser ever opens the page, types the key, saves a policy or reads a transcript. It is verified
+    by hand. A spec with a second context (the owner) alongside a pair of users is the obvious next
+    test, and it is listed as a gap rather than implied to work.
 
 ## 7. Reading a failure
 

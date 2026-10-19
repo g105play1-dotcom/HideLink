@@ -25,8 +25,8 @@ environment provides it:
    Socket.IO Origin check; the API refuses to start in production if an `http://` origin is listed.
 3. **`TRUST_PROXY=true` only behind the proxy**, and the proxy must overwrite `X-Forwarded-For`
    rather than append to it.
-4. **Secrets outside the repository.** `DATABASE_URL` (and `ABUSE_HASH_SALT`, if used) come from the
-   environment or a root-owned file, never from a commit.
+4. **Secrets outside the repository.** `DATABASE_URL`, `ADMIN_TOKEN` (only if the archive is used) and
+   `ABUSE_HASH_SALT`, if used, come from the environment or a root-owned file, never from a commit.
 5. **A second PostgreSQL as a backup target, and a restore that has been rehearsed.** A backup that
    has never been restored is an assumption.
 6. **Monitoring and log retention.** The API logs security events and a correlation id per request;

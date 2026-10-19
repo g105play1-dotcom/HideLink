@@ -17,6 +17,7 @@ not.
 | **G. Social and protection** | Blocks, reports, voluntary contact disclosure | **Partially done.** Blocks and reports are complete; "friends/contacts" is not implemented. No contact is ever disclosed automatically. |
 | **H. Stabilisation** | Tests, lint, types, build, documentation, compliance table | **Done for the scope above**, with the explicit gaps listed below. |
 | **I. Growth preparation** | Redis seam, media seam, monetisation readiness, deployment sketch | **Partly done, on purpose.** Seams and documentation exist; no second instance, no media, no ads, no payments. |
+| **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is verified by hand only. |
 
 ## Verified by automation
 
@@ -28,10 +29,10 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 
 | Feature | Why not | What would be needed |
 | --- | --- | --- |
-| Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it) |
+| Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it, and the archive already has inert `storeMedia`/`mediaKind` fields waiting for it) |
 | Contacts / friends list | Brief allows it only after the core chat is solid; nothing in the MVP creates permanent links | A permission model, request/accept flow, and a privacy decision about what a "contact" reveals |
-| Chat archives for administrators | Contradicts "transcripts are never stored" (D1) | A reversal of D1 — a product and legal decision, not an engineering one |
-| Moderation console | No transcripts to read; reports are the only signal | A triage workflow over `Report` + `SecurityEvent` |
+| Chat archive *encryption and audit* | The archive itself is built (D21); protecting it further is separate work | Encryption at rest (a volume or a key outside the process), an audit trail of owner actions, and a rehearsed restore that treats transcripts as the sensitive asset |
+| Moderation console | Reports are the only signal, and only the owner can read the archive | A triage workflow over `Report` + `SecurityEvent`; note the existing `/admin` page is *not* it — it cannot ban or act on a report |
 | Ads / Premium | Brief forbids fake monetisation; core chat comes first | Real entitlements enforced server-side |
 | Redis-backed queue, multiple instances | No measured need; the seam is documented | Shared queue + presence, sticky sessions or a cross-process event bus, load tests first |
 | Load/soak testing, monitoring, backups | Requires a target environment; not possible to claim from localhost | A deployment, an observability stack, and a restore rehearsal |
@@ -39,10 +40,11 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 
 ## Next steps in order
 
-1. **Confirm the owner decisions below**, because two of them (minors, archives) change what the
-   product is allowed to do.
+1. **Owner decisions are settled** (minors, archives — items 1 and 2 below); nothing is waiting on
+   them before the project can be operated.
 2. **Deploy to a single host** behind HTTPS + a reverse proxy: `COOKIE_SECURE=true`, https-only
-   `CORS_ORIGINS`, secrets outside the repository, and `ABUSE_HASH_SALT` decided on purpose.
+   `CORS_ORIGINS`, secrets outside the repository, `ADMIN_TOKEN` generated (only if the archive is
+   used) and `ABUSE_HASH_SALT` decided on purpose.
 3. **Operate it**: database backups with a rehearsed restore, log retention, uptime and error
    alerting, and a documented way to handle a report.
 4. **Measure before scaling**: a load test that establishes how many concurrent chats one process
@@ -59,20 +61,25 @@ cost — not in code quality.
    user's choice. The consequence (a self-declared minor can meet an adult, and declared age cannot be
    verified) is recorded in `docs/PRODUCT_SPEC.md` and `docs/SECURITY.md`, and the decision itself is
    `docs/DECISIONS.md` D20. No further input is needed unless the owner wants to revisit it.
-2. **Chat archives — decided (2026-10-19), not yet built.** The owner wants transcript storage to be
-   possible, readable only by the owner, switchable for everyone, by parameters (age, gender, city,
-   …) or for individually chosen users, with nothing said to the users about it. This reverses D1 and
-   needs its own subsystem (storage, owner access, retention, protection of the archive) plus an
-   answer to one question the code cannot invent: **how the owner authenticates**, since the product
-   has no accounts. The previous "transcripts are never stored" promise must be removed from the user
-   interface, because it would otherwise become false.
+2. **Chat archives — decided and built (2026-10-19).** Storage is possible, readable only by the owner,
+   switchable for everyone, by parameters (age, gender, city, …) or for individually chosen users,
+   with nothing said to users about it. It is off until the owner turns it on; the owner authenticates
+   with `ADMIN_TOKEN` and the page at `/admin`. `docs/DECISIONS.md` D21 records the reversal of D1 and
+   `docs/SECURITY.md` §13 records what it does **not** protect against. **Still outstanding, and not
+   an owner decision:** encrypting the archive at rest, an audit trail of owner actions, and a restore
+   rehearsal that treats transcripts as the sensitive asset. One decision remains genuinely open below
+   (item 6).
 3. **Retention defaults.** `REPORT_RETENTION_DAYS=30`, `SESSION_RETENTION_DAYS=7`,
    `SECURITY_EVENT_RETENTION_DAYS=90` are placeholders chosen for reasonableness, not for any
-   jurisdiction. They may need to match local law.
+   jurisdiction. They may need to match local law. The archive's `retentionDays` is chosen at `/admin`
+   and starts at 90.
 4. **Abuse investigation.** Whether `ABUSE_HASH_SALT` should be set in production (enables hashed
    IP/User-Agent correlation) or left unset (stores no client identifiers at all).
 5. **Hosting and cost.** Everything currently runs locally with no paid or remote resources. A public
    launch needs a host, a domain, TLS, and a database backup destination.
+6. **If the archive is enabled: how it is protected outside the process.** The code cannot decide
+   whether the database volume is encrypted, who may read a backup, or how long a dump is retained —
+   and those are the only things standing between a stored transcript and a third party.
 6. **Monetisation direction.** Whether there is one at all; the code is ready for server-enforced
    entitlements but nothing is implemented.
 7. **Third availability mode "only people who already know my ID".** Today an identity either accepts
