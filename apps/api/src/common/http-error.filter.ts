@@ -5,7 +5,7 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
-import { ErrorCode } from '@anonlink/shared';
+import { ErrorCode, errorMessage } from '@anonlink/shared';
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
 
@@ -63,41 +63,33 @@ export class HttpErrorFilter implements ExceptionFilter {
 
     if (exception instanceof ZodError) {
       const first = exception.issues[0];
+      // `path[0]` is the source label the validation pipe added (`body`, `param`,
+      // `query`), so this reads e.g. `body.incomingRequests: Unrecognized key`.
       return {
         status: HttpStatus.BAD_REQUEST,
         payload: {
           code: ErrorCode.INVALID_INPUT,
-          message: 'The request contains invalid data.',
-          context: first ? `${first.path.join('.') || 'body'}: ${first.message}` : undefined,
+          message: errorMessage(ErrorCode.INVALID_INPUT),
+          context: first ? `${first.path.join('.') || 'input'}: ${first.message}` : undefined,
         },
       };
     }
 
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
-      // Nest's own exceptions (404 for unknown routes, 413 for oversized bodies)
-      // are already safe, but their message is not part of our contract.
+      // Nest's own exceptions — an unknown route, an oversized body, a malformed JSON
+      // payload — are mapped onto our own codes, so *every* response a client can see
+      // is expressible in `ErrorCode` and none of them echo Nest's wording.
       const code =
         status === HttpStatus.NOT_FOUND
-          ? 'ROUTE_NOT_FOUND'
+          ? ErrorCode.ROUTE_NOT_FOUND
           : status === HttpStatus.PAYLOAD_TOO_LARGE
-            ? 'PAYLOAD_TOO_LARGE'
+            ? ErrorCode.PAYLOAD_TOO_LARGE
             : status === HttpStatus.TOO_MANY_REQUESTS
               ? ErrorCode.RATE_LIMITED
               : ErrorCode.INVALID_INPUT;
 
-      return {
-        status,
-        payload: {
-          code,
-          message:
-            status === HttpStatus.NOT_FOUND
-              ? 'This endpoint does not exist.'
-              : status === HttpStatus.PAYLOAD_TOO_LARGE
-                ? 'The request body is too large.'
-                : exception.message,
-        },
-      };
+      return { status, payload: { code, message: errorMessage(code) } };
     }
 
     // Anything else is a bug. Log it fully server-side, tell the client nothing.

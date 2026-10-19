@@ -70,8 +70,13 @@ export function endedReasonFor(
 
   switch (reason) {
     case 'left':
-    case 'disconnected':
       return isActor ? 'left' : 'peer_left';
+    case 'disconnected':
+      // Reported honestly to the side that is still there: "the other person dropped
+      // off", rather than a vague "they left", which reads like a decision. The side
+      // that dropped sees an ordinary end — accurate enough, and it avoids telling a
+      // returning user that *they* abandoned the chat.
+      return isActor ? 'left' : 'disconnected';
     case 'blocked':
       return isActor ? 'blocked' : 'peer_left';
     case 'reported':

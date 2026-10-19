@@ -1,9 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { IncomingRequestPolicy } from '@anonlink/shared';
+import type {
+  DeclaredProfile,
+  IncomingRequestPolicy,
+  MatchSide,
+  SearchPreferences,
+} from '@anonlink/shared';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { log } from '../common/logger.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  IDENTITY_SETTINGS_SELECT,
+  toDeclaredProfile,
+  toSearchPreferences,
+} from '../identity/settings.mapper.js';
 
 /**
  * Synchronous in-memory view of the handful of per-identity facts that the
@@ -32,14 +42,27 @@ import { PrismaService } from '../prisma/prisma.service.js';
  *
  * Facts are refreshed when an identity opens a socket (`refresh`), so stale data
  * lives at most as long as a connection. Local mutations (blocking, changing the
- * request policy, banning) update the cache immediately, so no operation ever
- * observes its own stale write.
+ * request policy, banning, editing the profile or the filters) update the cache
+ * immediately, so no operation ever observes its own stale write.
+ *
+ * ## Why filters need *both* sides loaded
+ *
+ * `isBlockedBetween(a, b)` is answerable from `a`'s records alone, but a filter is a
+ * mutual question: `a`'s filters must accept `b` *and* `b`'s must accept `a`. So
+ * `mutuallyCompatible` requires facts for both identities and returns `false` when
+ * either is missing. That fails closed on purpose — an unknown candidate is never
+ * matched with someone who asked for a specific kind of partner — and it is safe,
+ * because a ticket only exists for an identity that was loaded when it queued and
+ * `refresh()` runs on every reconnect.
  */
 export interface IdentityFacts {
   readonly userId: string;
   readonly publicId: string;
   readonly banned: boolean;
   readonly incomingRequests: IncomingRequestPolicy;
+  /** Voluntary, self-declared data. Never shown to a peer; only feeds filters. */
+  readonly profile: DeclaredProfile;
+  readonly preferences: SearchPreferences;
 }
 
 @Injectable()
@@ -127,17 +150,41 @@ export class DirectoryService {
   }
 
   /** Updates cached facts after a local mutation (settings change, ban). */
-  patch(userId: string, patch: Partial<Pick<IdentityFacts, 'banned' | 'incomingRequests'>>): void {
+  patch(
+    userId: string,
+    patch: Partial<Pick<IdentityFacts, 'banned' | 'incomingRequests' | 'profile' | 'preferences'>>,
+  ): void {
     const current = this.facts.get(userId);
     if (!current) return;
     this.facts.set(userId, { ...current, ...patch });
+  }
+
+  /**
+   * The two matchmaking sides of a potential pair, or `null` when either is unknown.
+   *
+   * The directory deliberately stops here: it *reads* facts, while deciding who may meet
+   * whom (blocks, bans, relaxation stages, filters) is the chat service's job. Returning
+   * the two sides in one call keeps the eligibility predicate down to a single lookup.
+   *
+   * Fails closed: an unknown side yields `null`, and the caller must treat that as "not
+   * eligible" rather than as "no filters".
+   */
+  sides(a: string, b: string): { a: MatchSide; b: MatchSide } | null {
+    const left = this.facts.get(a);
+    const right = this.facts.get(b);
+    if (!left || !right) return null;
+
+    return {
+      a: { profile: left.profile, preferences: left.preferences },
+      b: { profile: right.profile, preferences: right.preferences },
+    };
   }
 
   private async load(userId: string): Promise<void> {
     const [identity, blockedByMe, blockingMe] = await Promise.all([
       this.prisma.identity.findUnique({
         where: { id: userId },
-        select: { id: true, publicId: true, bannedAt: true, incomingRequests: true },
+        select: { id: true, publicId: true, bannedAt: true, ...IDENTITY_SETTINGS_SELECT },
       }),
       this.prisma.block.findMany({ where: { blockerId: userId }, select: { blockedId: true } }),
       this.prisma.block.findMany({ where: { blockedId: userId }, select: { blockerId: true } }),
@@ -154,6 +201,8 @@ export class DirectoryService {
       publicId: identity.publicId,
       banned: identity.bannedAt !== null,
       incomingRequests: identity.incomingRequests,
+      profile: toDeclaredProfile(identity),
+      preferences: toSearchPreferences(identity),
     });
     this.blockedByMe.set(userId, new Set(blockedByMe.map((row) => row.blockedId)));
     this.blockingMe.set(userId, new Set(blockingMe.map((row) => row.blockerId)));

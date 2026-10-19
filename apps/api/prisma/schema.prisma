@@ -35,6 +35,17 @@ enum IncomingRequestPolicy {
   nobody
 }
 
+/// Self-declared gender.
+///
+/// Unverified by construction — there is no sign-up to verify it against — so it is
+/// used *only* to evaluate search filters, and is never shown to a peer. Absent means
+/// "not stated", which never satisfies a gender filter.
+enum Gender {
+  female
+  male
+  other
+}
+
 enum ChatKind {
   random
   direct
@@ -80,6 +91,40 @@ model Identity {
   bannedReason String?   @db.VarChar(200)
 
   incomingRequests IncomingRequestPolicy @default(everyone)
+
+  // ---------------------------------------------------------------------------
+  // Voluntary, self-declared profile and search filters.
+  //
+  // Every column below is optional and none of it is verified: AnonLink has no
+  // registration, so there is nothing to verify against. The whole group exists so a
+  // user can say "поиск: жен., 25-35, мой город" and be matched accordingly — it is a
+  // preference hint for the matchmaker, never a published fact about a person.
+  //
+  // The languages are stored as free strings rather than a Postgres enum because the
+  // vocabulary is expected to grow; the *values* are validated against the shared
+  // `LANGUAGES` list on every write, so the database cannot hold a language the code
+  // does not understand.
+  // ---------------------------------------------------------------------------
+
+  /// Self-declared gender (`Gender` enum). Null = not stated.
+  declaredGender   Gender?
+  /// Year of birth, not age: an age would silently go stale.
+  declaredBirthYear Int?
+  declaredCity     String? @db.VarChar(64)
+  declaredRegion   String? @db.VarChar(64)
+  declaredLanguages String[] @default([])
+
+  /// Genders the owner wants to be matched with. Empty = no constraint.
+  prefGenders  String[] @default([])
+  /// Inclusive age bounds applied to the *candidate's* declared year of birth.
+  prefAgeMin   Int?
+  prefAgeMax   Int?
+  /// `any` | `city` | `region` — compares the candidate's declared place with the owner's.
+  prefLocation String   @default("any") @db.VarChar(16)
+  /// Languages the owner wants the candidate to share at least one of. Empty = no constraint.
+  prefLanguages String[] @default([])
+  /// Whether the server may drop filters, visibly, after a long wait. Off by default.
+  prefRelax    Boolean  @default(false)
 
   sessions       Session[]
   chatsAsA       ChatSession[] @relation("ChatParticipantA")

@@ -7,7 +7,6 @@ import { ChatService } from '../chat/chat.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const SWEEP_INTERVAL_MS = 15_000;
 
 export interface MaintenanceReport {
   /** Matchmaking tickets dropped because their owner went quiet. */
@@ -16,6 +15,10 @@ export interface MaintenanceReport {
   expiredRequests: number;
   /** Finished chats evicted from memory after their tombstone expired. */
   prunedChats: number;
+  /** Searches widened because their owner waited too long with filters on. */
+  widenedSearches: number;
+  /** Of those widened searches, how many found a partner immediately. */
+  relaxedMatches: number;
   /** Reports deleted because their retention deadline passed. */
   deletedReports: number;
   /** Security events deleted because their retention deadline passed. */
@@ -54,16 +57,27 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
   ) {}
 
   onModuleInit(): void {
-    // Tests drive `runOnce` explicitly so that cleanup never races an assertion.
-    if (this.config.isTest) return;
+    const intervalMs = this.config.MAINTENANCE_INTERVAL_MS;
+
+    // Zero means "no periodic housekeeping". It is a configuration value rather than a
+    // `NODE_ENV` check because the end-to-end stack is a real server that *does* need the
+    // sweep to run, while the integration suite needs it never to run, so its assertions
+    // cannot race a sweep. (Note: nothing drives `runOnce` by hand today — the integration
+    // suite only proves that widening stays off, and retention is exercised solely where the
+    // interval is enabled, i.e. the E2E stack. A dedicated sweep test is still missing; see
+    // docs/TESTING.md §6.) One flag, set explicitly by whoever knows which of the two it is.
+    if (intervalMs <= 0) {
+      log.info('maintenance.disabled', {});
+      return;
+    }
 
     this.timer = setInterval(() => {
       void this.runOnce();
-    }, SWEEP_INTERVAL_MS);
+    }, intervalMs);
 
     // Housekeeping must never be the reason a process stays alive.
     this.timer.unref();
-    log.info('maintenance.started', { intervalMs: SWEEP_INTERVAL_MS });
+    log.info('maintenance.started', { intervalMs });
   }
 
   onApplicationShutdown(): void {
@@ -77,6 +91,8 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       expiredTickets: 0,
       expiredRequests: 0,
       prunedChats: 0,
+      widenedSearches: 0,
+      relaxedMatches: 0,
       deletedReports: 0,
       deletedSecurityEvents: 0,
       deletedSessions: 0,
@@ -84,10 +100,18 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
 
     try {
       const swept = this.chat.sweep(now);
+      // Widening runs before retention: it changes who the user is about to meet, which is
+      // the most time-sensitive thing this job does.
+      const relaxed = await this.chat.relax(now);
       this.rateLimit.sweep(now);
       const retention = await this.enforceRetention(now);
 
-      const report: MaintenanceReport = { ...swept, ...retention };
+      const report: MaintenanceReport = {
+        ...swept,
+        ...retention,
+        widenedSearches: relaxed.widened,
+        relaxedMatches: relaxed.matched,
+      };
       const touched = Object.values(report).some((count) => count > 0);
       if (touched) log.debug('maintenance.swept', { ...report });
 
@@ -101,7 +125,9 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
   /** Deletes everything whose retention deadline has passed. */
   private async enforceRetention(
     now: number,
-  ): Promise<Omit<MaintenanceReport, 'expiredTickets' | 'expiredRequests' | 'prunedChats'>> {
+  ): Promise<
+    Pick<MaintenanceReport, 'deletedReports' | 'deletedSecurityEvents' | 'deletedSessions'>
+  > {
     const at = new Date(now);
     const sessionCutoff = new Date(now - this.config.SESSION_RETENTION_DAYS * DAY_MS);
 

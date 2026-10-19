@@ -1,9 +1,14 @@
 import { Inject, Injectable, type OnApplicationShutdown } from '@nestjs/common';
 import {
   CONNECT_REQUEST_TTL_MS,
+  DEFAULT_SEARCH_PREFERENCES,
   ErrorCode,
+  activeFilterCount,
+  mutuallyCompatible,
+  relaxBySteps,
   type ChatMessageInput,
   type ReportReason,
+  type SearchPreferences,
 } from '@anonlink/shared';
 import type { SendRequestResult } from '@anonlink/protocol';
 
@@ -12,7 +17,7 @@ import { AppError } from '../common/app-error.js';
 import { newChatId, newMessageId, newRequestId } from '../common/ids.js';
 import { log } from '../common/logger.js';
 import { sanitizeMessageText } from '../common/sanitize.js';
-import { DirectoryService } from '../directory/directory.service.js';
+import { DirectoryService, type IdentityFacts } from '../directory/directory.service.js';
 import { ModerationService } from '../moderation/moderation.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PresenceService } from '../presence/presence.service.js';
@@ -33,6 +38,13 @@ export interface JoinRandomResult {
   kind: 'waiting' | 'matched';
   since: Date;
   chat?: ChatRecord;
+}
+
+/** What the server is applying to a search right now. */
+export interface SearchStatus {
+  criteria: SearchPreferences;
+  /** Milliseconds until the next filter is dropped, or `null` when none will be. */
+  relaxAfterMs: number | null;
 }
 
 /**
@@ -85,6 +97,9 @@ export class ChatService implements OnApplicationShutdown {
    * Either immediately pairs them with the longest-waiting eligible peer, or puts
    * them in the queue. Idempotent: pressing twice while waiting keeps the original
    * position instead of creating a second ticket.
+   *
+   * The filters applied are the ones stored on the identity, never what the client
+   * happened to send: the queue is the authority on who may meet whom.
    */
   async joinRandom(userId: string): Promise<JoinRandomResult> {
     await this.directory.ensureLoaded(userId);
@@ -93,16 +108,26 @@ export class ChatService implements OnApplicationShutdown {
     if (facts.banned) throw new AppError(ErrorCode.IDENTITY_BANNED);
     if (this.registry.activeFor(userId)) throw new AppError(ErrorCode.ALREADY_IN_CHAT);
 
+    // A re-join keeps the ticket that already exists, including any relaxation the
+    // server has applied to it, so the caller's *current* step count is what counts.
+    const mySteps = this.matching.relaxedStepsOf(userId);
+
     // ---- critical section: no awaits below this line ----
-    const outcome = this.matching.claimOrEnqueue(userId, (candidateId) => {
-      if (this.registry.activeFor(candidateId)) return false;
-      if (this.directory.isBanned(candidateId)) return false;
-      return !this.directory.isBlockedBetween(userId, candidateId);
-    });
+    const outcome = this.matching.claimOrEnqueue(
+      userId,
+      (candidateId, candidate) =>
+        this.isEligible(userId, mySteps, candidateId, candidate.relaxedSteps),
+      { relaxAllowed: facts.preferences.relaxAllowed },
+    );
     // ---- end of critical section ----
 
     if (outcome.kind === 'waiting') {
-      this.bus.emit({ type: 'match.queued', userId, since: outcome.since });
+      this.bus.emit({
+        type: 'match.queued',
+        userId,
+        since: outcome.since,
+        ...this.searchStatus(userId, outcome.since.getTime()),
+      });
       return { kind: 'waiting', since: outcome.since };
     }
 
@@ -123,6 +148,68 @@ export class ChatService implements OnApplicationShutdown {
     return cancelled;
   }
 
+  /**
+   * What the server is applying to this identity's search, and when it will widen it.
+   *
+   * The client asks for this instead of trusting its own copy of the settings: after a
+   * relaxation the client's copy is stale by definition, and the whole point of the
+   * feature is that the server is the authority on what is actually being applied.
+   */
+  searchStatus(userId: string, now: number = Date.now()): SearchStatus {
+    return {
+      criteria: this.effectiveCriteria(userId),
+      relaxAfterMs: this.relaxationEta(userId, now),
+    };
+  }
+
+  /**
+   * Widens searches that have been waiting too long, then retries them immediately.
+   *
+   * ## Why widen at all
+   *
+   * A filter nobody satisfies looks exactly like an empty network: the user waits, sees
+   * nothing, and leaves. Relaxation trades a *precise* match for *some* match after a
+   * wait the user themselves allowed — only when `relaxAllowed` is set, in a documented
+   * order, and with an explicit notice of what was dropped. Widening silently would be
+   * worse than never matching, because the user would be handed precisely the person
+   * they had filtered out.
+   *
+   * ## Why it retries the match at once
+   *
+   * The compatible partner may have been sitting in the queue the entire time, rejected
+   * only by the filter that has just been dropped. Without the retry, both of them would
+   * stay queued even though nothing separates them any more.
+   */
+  async relax(now: number = Date.now()): Promise<{ widened: number; matched: number }> {
+    const due = this.matching.relaxationDue(now, {
+      relaxAfterMs: this.config.MATCH_RELAX_AFTER_MS,
+      stepMs: this.config.MATCH_RELAX_STEP_MS,
+    });
+
+    let widened = 0;
+    let matched = 0;
+
+    for (const { userId, previousSteps, steps } of due) {
+      const facts = this.directory.get(userId);
+      if (!facts) continue;
+
+      const { criteria, dropped } = relaxBySteps(facts.preferences, steps);
+
+      // Only the filters this step *newly* removed are announced. `dropped` is
+      // cumulative, so anything already reported out of the earlier steps is left out —
+      // a user must never be told twice about the same criterion.
+      const newlyDropped = dropped.slice(previousSteps);
+      if (newlyDropped.length === 0) continue;
+
+      this.bus.emit({ type: 'match.relaxed', userId, dropped: newlyDropped, criteria });
+      widened += 1;
+
+      if (await this.tryMatchWaitingUser(userId, steps)) matched += 1;
+    }
+
+    return { widened, matched };
+  }
+
   // ---------------------------------------------------------------------------
   // Messaging
   // ---------------------------------------------------------------------------
@@ -141,6 +228,11 @@ export class ChatService implements OnApplicationShutdown {
 
     const sanitized = sanitizeMessageText(input.text, this.config.MESSAGE_MAX_LENGTH);
     if (sanitized.empty) throw new AppError(ErrorCode.MESSAGE_EMPTY);
+    // Rejected rather than quietly shortened: a sender whose message arrives cut in
+    // half has no way to know, and the peer silently receives something the sender did
+    // not write. The web composer caps input at the same limit, so this is the
+    // server-side backstop, not the usual path.
+    if (sanitized.truncated) throw new AppError(ErrorCode.MESSAGE_TOO_LONG);
 
     const candidate: StoredMessage = {
       messageId: newMessageId(),
@@ -350,7 +442,8 @@ export class ChatService implements OnApplicationShutdown {
     const peerId = chat.peerOf(blockerId);
     // The peer is always in the directory while a chat is running (they had a
     // socket), so the fallback is only a safety net for a mid-flight teardown.
-    const peerPublicId = this.directory.get(peerId)?.publicId ?? (await this.resolvePublicId(peerId));
+    const peerPublicId =
+      this.directory.get(peerId)?.publicId ?? (await this.resolvePublicId(peerId));
 
     await this.moderation.block(blockerId, peerId);
     await this.moderation.recordSecurityEvent('chat_blocked', blockerId, peerId);
@@ -453,10 +546,13 @@ export class ChatService implements OnApplicationShutdown {
     if (!chat) return;
 
     // They came back inside the grace window: cancel the pending teardown and tell
-    // both sides, so the peer stops seeing "reconnecting…".
+    // the peer, so it stops showing "reconnecting…".
+    //
+    // The transcript itself is *not* sent from here: re-attaching a conversation is
+    // per-socket work, and only the gateway knows which socket is asking. It emits
+    // `chat:resumed` for every connection, including this one.
     this.cancelGraceTimersFor(chat.chatId, userId);
     this.bus.emit({ type: 'chat.presence', chat, userId, present: true });
-    this.bus.emit({ type: 'chat.resumed', chat, userId });
   }
 
   /**
@@ -480,7 +576,9 @@ export class ChatService implements OnApplicationShutdown {
   stateFor(userId: string): ChatState {
     return {
       queued: this.matching.isQueued(userId),
-      ...(this.matching.queuedSince(userId) ? { queuedSince: this.matching.queuedSince(userId) } : {}),
+      ...(this.matching.queuedSince(userId)
+        ? { queuedSince: this.matching.queuedSince(userId) }
+        : {}),
       ...(this.registry.activeFor(userId) ? { activeChat: this.registry.activeFor(userId) } : {}),
       pendingRequests: this.requests.pendingCountFor(userId),
     };
@@ -559,10 +657,111 @@ export class ChatService implements OnApplicationShutdown {
   // Internals
   // ---------------------------------------------------------------------------
 
-  private requireFacts(userId: string): { publicId: string; banned: boolean } {
+  private requireFacts(userId: string): IdentityFacts {
     const facts = this.directory.get(userId);
     if (!facts) throw new AppError(ErrorCode.IDENTITY_NOT_FOUND);
     return facts;
+  }
+
+  /**
+   * Whether `seekerId` and `candidateId` may be paired.
+   *
+   * Synchronous by contract: it runs inside the matchmaker's critical section, so it may
+   * not await anything. Every question fails closed — a banned or unknown candidate is
+   * skipped, never guessed about.
+   *
+   * The filter check is *mutual*: each side is evaluated against the other's
+   * declaration, with whatever relaxation the server has already applied to that side's
+   * waiting ticket. One-sided checking would hand a user to somebody who had explicitly
+   * filtered them out.
+   */
+  private isEligible(
+    seekerId: string,
+    seekerSteps: number,
+    candidateId: string,
+    candidateSteps: number,
+  ): boolean {
+    if (this.registry.activeFor(candidateId)) return false;
+    if (this.directory.isBanned(candidateId)) return false;
+    if (this.directory.isBlockedBetween(seekerId, candidateId)) return false;
+
+    const sides = this.directory.sides(seekerId, candidateId);
+    if (!sides) return false;
+
+    return mutuallyCompatible(
+      {
+        profile: sides.a.profile,
+        preferences: relaxBySteps(sides.a.preferences, seekerSteps).criteria,
+      },
+      {
+        profile: sides.b.profile,
+        preferences: relaxBySteps(sides.b.preferences, candidateSteps).criteria,
+      },
+    );
+  }
+
+  /** The filters in force for a queued identity: their own, minus whatever was relaxed. */
+  private effectiveCriteria(userId: string): SearchPreferences {
+    const facts = this.directory.get(userId);
+    if (!facts) return { ...DEFAULT_SEARCH_PREFERENCES };
+
+    const steps = this.matching.relaxedStepsOf(userId);
+    return steps > 0 ? relaxBySteps(facts.preferences, steps).criteria : { ...facts.preferences };
+  }
+
+  /** Milliseconds until the next filter is dropped, or `null` when none is coming. */
+  private relaxationEta(userId: string, now: number): number | null {
+    const facts = this.directory.get(userId);
+    if (!facts?.preferences.relaxAllowed) return null;
+
+    const after = this.config.MATCH_RELAX_AFTER_MS;
+    if (after <= 0) return null;
+
+    // Nothing to widen means nothing to announce: the user would otherwise be promised a
+    // relaxation that cannot change who they meet.
+    const available = activeFilterCount(facts.preferences);
+    if (available === 0) return null;
+
+    const since = this.matching.queuedSince(userId);
+    if (!since) return null;
+
+    const step = Math.max(1, this.config.MATCH_RELAX_STEP_MS);
+    const waited = now - since.getTime();
+    if (waited < after) return after - waited;
+
+    const taken = Math.floor((waited - after) / step) + 1;
+    if (taken >= available) return null;
+
+    return after + taken * step - waited;
+  }
+
+  /** Retries one waiting identity after its filters were widened. */
+  private async tryMatchWaitingUser(userId: string, steps: number): Promise<boolean> {
+    if (!this.matching.isQueued(userId)) return false;
+
+    // The identity may have been matched, or entered a chat, since the sweep began.
+    if (this.registry.activeFor(userId)) {
+      this.matching.cancel(userId);
+      return false;
+    }
+
+    const outcome = this.matching.claimOrEnqueue(
+      userId,
+      (candidateId, candidate) =>
+        this.isEligible(userId, steps, candidateId, candidate.relaxedSteps),
+      { relaxAllowed: this.directory.get(userId)?.preferences.relaxAllowed ?? false },
+    );
+
+    if (outcome.kind === 'waiting') return false;
+
+    await this.createAndPersistChat({
+      kind: 'random',
+      participantAId: userId,
+      participantBId: outcome.peerId,
+      initiatorId: userId,
+    });
+
+    return true;
   }
 
   /**
@@ -612,9 +811,13 @@ export class ChatService implements OnApplicationShutdown {
 
       // Put both back in the random queue: they were waiting for a chat, and the
       // service failing is not their fault. Re-queueing may pair them with someone
-      // else immediately, which is the desired behaviour.
-      this.matching.enqueue(params.participantAId);
-      this.matching.enqueue(params.participantBId);
+      // else immediately, which is the desired behaviour. Their relaxation permission
+      // travels with them, so a retry cannot silently make their search stricter.
+      for (const id of [params.participantAId, params.participantBId]) {
+        this.matching.enqueue(id, {
+          relaxAllowed: this.directory.get(id)?.preferences.relaxAllowed ?? false,
+        });
+      }
 
       log.error('chat.persist_failed', error, { kind: params.kind });
       throw new AppError(ErrorCode.INTERNAL_ERROR, undefined, { cause: error });

@@ -1,15 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  ErrorCode,
-  generatePublicId,
-  type IncomingRequestPolicy,
-} from '@anonlink/shared';
+import { ErrorCode, generatePublicId, type IdentitySettingsView } from '@anonlink/shared';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { AppError } from '../common/app-error.js';
 import { newSessionToken, optionalSaltHash, sha256Hex } from '../common/ids.js';
 import { log } from '../common/logger.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  IDENTITY_SETTINGS_SELECT,
+  preferencesToColumns,
+  profileToColumns,
+  toSettingsView,
+  type IdentitySettingsData,
+  type SettingsUpdateCommand,
+} from './settings.mapper.js';
 
 /**
  * The authenticated principal behind a request or a socket.
@@ -24,7 +28,14 @@ export interface AuthenticatedIdentity {
   identityCreatedAt: Date;
   /** Absolute expiry of the session that authenticated this request. */
   sessionExpiresAt: Date;
-  incomingRequests: IncomingRequestPolicy;
+  /**
+   * The identity's own settings: privacy, declared profile and search filters.
+   *
+   * Carried on the authenticated identity because every surface that needs them (the
+   * REST views and the `session:ready` handshake) has already resolved the session, and
+   * a second read of the same row would only add a way for the two to disagree.
+   */
+  settings: IdentitySettingsView;
   banned: boolean;
 }
 
@@ -49,6 +60,8 @@ export interface PublicUserLookup {
 }
 
 const UNIQUE_VIOLATION = 'P2002';
+/** Prisma's "record to update not found". An identity deleted mid-request. */
+const MISSING_RECORD = 'P2025';
 /** How often `lastSeenAt` / `lastUsedAt` may be written for one session. */
 const TOUCH_INTERVAL_MS = 5 * 60_000;
 
@@ -108,8 +121,8 @@ export class IdentityService {
             id: true,
             publicId: true,
             createdAt: true,
-            incomingRequests: true,
             sessions: { select: { id: true }, take: 1 },
+            ...IDENTITY_SETTINGS_SELECT,
           },
         });
 
@@ -125,7 +138,7 @@ export class IdentityService {
             sessionId: session.id,
             identityCreatedAt: created.createdAt,
             sessionExpiresAt: expiresAt,
-            incomingRequests: created.incomingRequests,
+            settings: toSettingsView(created),
             banned: false,
           },
           token,
@@ -165,7 +178,7 @@ export class IdentityService {
             publicId: true,
             createdAt: true,
             bannedAt: true,
-            incomingRequests: true,
+            ...IDENTITY_SETTINGS_SELECT,
           },
         },
       },
@@ -183,7 +196,7 @@ export class IdentityService {
       sessionId: session.id,
       identityCreatedAt: identity.createdAt,
       sessionExpiresAt: session.expiresAt,
-      incomingRequests: identity.incomingRequests,
+      settings: toSettingsView(identity),
       banned: identity.bannedAt !== null,
     };
   }
@@ -266,33 +279,42 @@ export class IdentityService {
     };
   }
 
+  /**
+   * Applies an already-validated settings change and returns the resulting settings.
+   *
+   * Merging and validating happen in the controller, which is the only place that sees
+   * both the stored values and the request (see `SettingsUpdateCommand`). This method
+   * writes and reports what it wrote, nothing more.
+   */
   async updateSettings(
     userId: string,
-    settings: { incomingRequests?: IncomingRequestPolicy },
-  ): Promise<AuthenticatedIdentity | null> {
-    const updated = await this.prisma.identity.update({
-      where: { id: userId },
-      data: {
-        ...(settings.incomingRequests ? { incomingRequests: settings.incomingRequests } : {}),
-      },
-      select: {
-        id: true,
-        publicId: true,
-        createdAt: true,
-        incomingRequests: true,
-        bannedAt: true,
-      },
-    });
-
-    return {
-      userId: updated.id,
-      publicId: updated.publicId,
-      sessionId: '',
-      identityCreatedAt: updated.createdAt,
-      sessionExpiresAt: new Date(0),
-      incomingRequests: updated.incomingRequests,
-      banned: updated.bannedAt !== null,
+    update: SettingsUpdateCommand,
+  ): Promise<IdentitySettingsView | null> {
+    const data: IdentitySettingsData = {
+      ...(update.incomingRequests ? { incomingRequests: update.incomingRequests } : {}),
+      ...(update.profile ? profileToColumns(update.profile) : {}),
+      ...(update.search ? preferencesToColumns(update.search) : {}),
     };
+
+    if (Object.keys(data).length === 0) {
+      const current = await this.prisma.identity.findUnique({
+        where: { id: userId },
+        select: IDENTITY_SETTINGS_SELECT,
+      });
+      return current ? toSettingsView(current) : null;
+    }
+
+    try {
+      const updated = await this.prisma.identity.update({
+        where: { id: userId },
+        data,
+        select: IDENTITY_SETTINGS_SELECT,
+      });
+      return toSettingsView(updated);
+    } catch (error) {
+      if (isMissingRecord(error)) return null;
+      throw error;
+    }
   }
 
   /** Cleanup hook: drops touch bookkeeping for sessions that are gone. */
@@ -313,5 +335,15 @@ export function isUniqueViolation(error: unknown): boolean {
     error !== null &&
     'code' in error &&
     (error as { code?: unknown }).code === UNIQUE_VIOLATION
+  );
+}
+
+/** True when a Prisma error says the record being changed no longer exists. */
+function isMissingRecord(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === MISSING_RECORD
   );
 }

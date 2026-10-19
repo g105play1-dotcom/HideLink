@@ -110,7 +110,7 @@ function describeConnectionError(error, host, port) {
       message: `PostgreSQL rejected the credentials in DATABASE_URL (${code}).`,
       hint: [
         'Provision the application role and database once, as a superuser:',
-        '    $env:PGPASSWORD=\'<postgres-superuser-password>\'',
+        "    $env:PGPASSWORD='<postgres-superuser-password>'",
         '    & "C:\\Program Files\\PostgreSQL\\18\\bin\\psql.exe" -U postgres -h localhost -p 5432 `',
         '        -d postgres -v ON_ERROR_STOP=1 -f infrastructure/postgres/init.sql',
       ].join('\n'),
@@ -124,7 +124,7 @@ function describeConnectionError(error, host, port) {
   }
   return {
     message: `Could not connect to PostgreSQL: ${error?.message ?? String(error)}`,
-    hint: 'Run `pnpm doctor` at the repository root for a full environment report.',
+    hint: 'Run `pnpm diagnose` at the repository root for a full environment report.',
   };
 }
 

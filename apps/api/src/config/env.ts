@@ -65,6 +65,24 @@ const envSchema = z.object({
   /** How long a peer may stay disconnected before the chat is abandoned. */
   PEER_RECONNECT_GRACE_MS: z.coerce.number().int().min(1000).max(120_000).default(15_000),
 
+  // --- Search filters -------------------------------------------------------
+  /**
+   * How long a filtered search waits before the first filter is dropped.
+   *
+   * Deliberately generous: the point of a filter is to avoid a bad match, so widening
+   * too eagerly would defeat the setting rather than serve it. Zero disables relaxation
+   * entirely, which is what the integration tests use to make "filters keep two
+   * incompatible users apart" deterministic.
+   */
+  MATCH_RELAX_AFTER_MS: z.coerce.number().int().min(0).max(3_600_000).default(45_000),
+  /** How much longer each further filter waits before it is dropped too. */
+  MATCH_RELAX_STEP_MS: z.coerce.number().int().min(1_000).max(600_000).default(20_000),
+  /**
+   * Housekeeping interval. `0` turns the periodic sweep off (integration tests drive it
+   * by hand); the end-to-end stack runs it fast so relaxation is observable in seconds.
+   */
+  MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(0).max(600_000).default(15_000),
+
   // --- Abuse protection -----------------------------------------------------
   RATE_LIMIT_HTTP_PER_MINUTE: z.coerce.number().int().min(1).default(120),
   RATE_LIMIT_SESSION_CREATE_PER_HOUR: z.coerce.number().int().min(1).default(30),
@@ -162,7 +180,7 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
         ...lines,
         '',
         'Fix the values in the repository-root `.env` file (start from `.env.example`).',
-        'Run `pnpm doctor` for a full environment report.',
+        'Run `pnpm diagnose` for a full environment report.',
       ].join('\n'),
     );
   }
@@ -185,7 +203,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
       );
     }
     if (problems.length > 0) {
-      throw new Error(['Unsafe production configuration:', ...problems.map((p) => `  - ${p}`)].join('\n'));
+      throw new Error(
+        ['Unsafe production configuration:', ...problems.map((p) => `  - ${p}`)].join('\n'),
+      );
     }
   }
 

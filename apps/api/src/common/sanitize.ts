@@ -18,6 +18,10 @@
  *    nodes, and lossy "HTML sanitising" on plain-text data is a common own-goal.
  */
 
+// Matching control characters is the entire point here: they are what garbles terminals,
+// breaks log viewers and forges layout in other clients. The rule exists to catch a
+// regex that *accidentally* contains a control character.
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
 const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 const EXCESS_NEWLINES = /\n{3,}/g;

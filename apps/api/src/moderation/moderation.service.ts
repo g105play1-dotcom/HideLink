@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { IncomingRequestPolicy, ReportReason } from '@anonlink/shared';
+import type { BlockedUserView, IncomingRequestPolicy, ReportReason } from '@anonlink/shared';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { newReportId } from '../common/ids.js';
@@ -24,11 +24,6 @@ export interface ReportInput {
   messageSnapshot?: string;
   reason: ReportReason;
   details?: string;
-}
-
-export interface BlockedUserView {
-  publicId: string;
-  blockedAt: string;
 }
 
 /** Coarse, low-volume security events. Never contains message text or addresses. */

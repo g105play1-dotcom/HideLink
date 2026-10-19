@@ -84,6 +84,10 @@ function defaultMessage(code: ErrorCode): string {
       return 'Unsupported event.';
     case ErrorCode.FORBIDDEN_ORIGIN:
       return 'This origin is not allowed to connect.';
+    case ErrorCode.ROUTE_NOT_FOUND:
+      return 'This endpoint does not exist.';
+    case ErrorCode.PAYLOAD_TOO_LARGE:
+      return 'The request body is too large.';
     case ErrorCode.DATABASE_UNAVAILABLE:
       return 'The service is temporarily unavailable.';
     default:
@@ -107,7 +111,10 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.CHAT_NOT_FOUND:
     case ErrorCode.REQUEST_NOT_FOUND:
     case ErrorCode.REQUEST_EXPIRED:
+    case ErrorCode.ROUTE_NOT_FOUND:
       return 404;
+    case ErrorCode.PAYLOAD_TOO_LARGE:
+      return 413;
     case ErrorCode.ALREADY_IN_CHAT:
     case ErrorCode.NOT_A_PARTICIPANT:
     case ErrorCode.CHAT_ENDED:

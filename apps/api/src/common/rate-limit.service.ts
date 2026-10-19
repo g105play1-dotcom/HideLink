@@ -20,11 +20,7 @@ import { ErrorCode } from '@anonlink/shared';
  */
 
 export type RateLimitBucket =
-  | 'http'
-  | 'sessionCreate'
-  | 'chatMessage'
-  | 'lookup'
-  | 'connectRequest';
+  'http' | 'sessionCreate' | 'chatMessage' | 'lookup' | 'connectRequest';
 
 export interface RateLimitResult {
   allowed: boolean;

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { MatchCancelReason, RequestStatus } from '@anonlink/protocol';
+import type { RelaxableCriterion, SearchPreferences } from '@anonlink/shared';
 
 import { log } from '../common/logger.js';
 import type { ChatRecord, StoredMessage } from '../chat/chat.registry.js';
@@ -30,11 +31,28 @@ import type { ConnectionRequest } from '../chat/chat.requests.js';
  */
 export type AppEvent =
   // --- matchmaking ---------------------------------------------------------
-  | { type: 'match.queued'; userId: string; since: Date }
+  | {
+      type: 'match.queued';
+      userId: string;
+      since: Date;
+      criteria: SearchPreferences;
+      relaxAfterMs: number | null;
+    }
   | { type: 'match.cancelled'; userId: string; reason: MatchCancelReason }
+  /**
+   * Filters were dropped to widen a search that is taking too long.
+   *
+   * Carries the criteria *now* in force rather than a diff, so the interface can show
+   * exactly what the server is applying without replaying the relaxation history.
+   */
+  | {
+      type: 'match.relaxed';
+      userId: string;
+      dropped: RelaxableCriterion[];
+      criteria: SearchPreferences;
+    }
   // --- chat lifecycle ------------------------------------------------------
   | { type: 'chat.started'; chat: ChatRecord }
-  | { type: 'chat.resumed'; chat: ChatRecord; userId: string }
   | { type: 'chat.message'; chat: ChatRecord; message: StoredMessage }
   | { type: 'chat.ended'; chat: ChatRecord; reason: ChatEndReasonSource }
   | { type: 'chat.presence'; chat: ChatRecord; userId: string; present: boolean }
@@ -58,12 +76,7 @@ export type AppEvent =
 
 /** Reasons a chat can end, as seen by the domain (before per-viewer translation). */
 export type ChatEndReasonSource =
-  | 'left'
-  | 'disconnected'
-  | 'blocked'
-  | 'reported'
-  | 'server_shutdown'
-  | 'expired';
+  'left' | 'disconnected' | 'blocked' | 'reported' | 'server_shutdown' | 'expired';
 
 export type AppEventListener = (event: AppEvent) => void;
 

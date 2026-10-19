@@ -4,7 +4,8 @@ import { blockSchema, userLookupParamsSchema } from '@anonlink/shared';
 import { zodBody, zodParam } from '../common/zod-validation.pipe.js';
 import { CurrentIdentity } from '../identity/request-context.js';
 import type { AuthenticatedIdentity } from '../identity/identity.service.js';
-import { ModerationService, type BlockedUserView } from '../moderation/moderation.service.js';
+import { ModerationService } from '../moderation/moderation.service.js';
+import type { BlockListResponse } from '@anonlink/shared';
 import { ChatService } from './chat.service.js';
 
 /**
@@ -27,7 +28,7 @@ export class ChatController {
 
   /** Everything this identity has blocked, newest first. */
   @Get()
-  async list(@CurrentIdentity() identity: AuthenticatedIdentity): Promise<{ blocks: BlockedUserView[] }> {
+  async list(@CurrentIdentity() identity: AuthenticatedIdentity): Promise<BlockListResponse> {
     return { blocks: await this.moderation.listBlocks(identity.userId) };
   }
 
@@ -44,7 +45,7 @@ export class ChatController {
   @Delete(':publicId')
   async unblock(
     @CurrentIdentity() identity: AuthenticatedIdentity,
-    @Param('publicId', zodParam(userLookupParamsSchema)) params: { publicId: string },
+    @Param(zodParam(userLookupParamsSchema)) params: { publicId: string },
   ): Promise<{ removed: boolean }> {
     return { removed: await this.chat.unblockByPublicId(identity.userId, params.publicId) };
   }

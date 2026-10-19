@@ -1,4 +1,5 @@
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
+import { WebSocketGateway } from '@nestjs/websockets';
 import {
   ErrorCode,
   blockPeerSchema,
@@ -21,6 +22,7 @@ import {
   type ErrorPayload,
   type InterServerEvents,
   type ServerToClientEvents,
+  type SessionReadyPayload,
   type SocketData,
 } from '@anonlink/protocol';
 import type { Server, Socket } from 'socket.io';
@@ -32,8 +34,14 @@ import { SESSION_COOKIE_NAME, parseCookieHeader } from '../common/cookies.js';
 import { log } from '../common/logger.js';
 import { RateLimitService, type RateLimitBucket } from '../common/rate-limit.service.js';
 import { AppEventBus, type AppEvent } from '../events/app-events.js';
-import { ChatService } from '../chat/chat.service.js';
-import { buildChatView, buildHistory, buildMessageView, endedReasonFor } from '../chat/chat.views.js';
+import { ChatService, type ChatState } from '../chat/chat.service.js';
+import {
+  buildChatView,
+  buildHistory,
+  buildMessageView,
+  endedReasonFor,
+} from '../chat/chat.views.js';
+import { DirectoryService } from '../directory/directory.service.js';
 import { IdentityService } from '../identity/identity.service.js';
 import type { AuthenticatedIdentity } from '../identity/identity.service.js';
 import { PresenceService } from '../presence/presence.service.js';
@@ -87,7 +95,18 @@ interface SocketAddresser {
  * lookup completes, and every handler awaits that lookup first. Without this, a
  * client that emits immediately after connecting could have its first payload
  * dropped because no listener existed yet.
+ *
+ * ## Why `@WebSocketGateway()`
+ *
+ * This decorator is what makes Nest create a Socket.IO server and hand it to
+ * {@link ChatGateway.afterInit}. Without it the class is an ordinary provider, the
+ * Socket.IO server is never attached to the HTTP server, and every handshake 404s —
+ * a failure that looks like a client bug but is purely a wiring one. The transport
+ * policy (origin allow-list, credentials, payload ceiling) comes from
+ * `ConfiguredSocketIoAdapter`, which is registered in `main.ts` and overrides
+ * `createIOServer` for exactly this gateway.
  */
+@WebSocketGateway()
 @Injectable()
 export class ChatGateway implements OnModuleInit, OnModuleDestroy {
   private server: AnonLinkServer | null = null;
@@ -112,6 +131,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     private readonly identityService: IdentityService,
     private readonly chat: ChatService,
     private readonly presence: PresenceService,
+    private readonly directory: DirectoryService,
     private readonly rateLimit: RateLimitService,
     private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
@@ -184,7 +204,19 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       // opening a second tab does not re-trigger the peer's "back online" notice.
       if (registration.firstSocket) await this.chat.handleConnected(identity.userId);
 
-      socket.emit('session:ready', this.buildSessionReady(identity));
+      const state = this.chat.stateFor(identity.userId);
+      socket.emit('session:ready', this.buildSessionReady(identity, state));
+
+      // The transcript is re-attached for *every* socket, not just the first one:
+      // otherwise a second tab, or a reconnect that reused an existing socket, would
+      // show an empty conversation.
+      if (state.activeChat) {
+        socket.emit('chat:resumed', {
+          chat: buildChatView(state.activeChat, identity.userId),
+          messages: buildHistory(state.activeChat, identity.userId),
+          initiator: state.activeChat.initiatorId === identity.userId,
+        });
+      }
 
       log.info('realtime.connected', { sockets: registration.sockets });
       return true;
@@ -199,25 +231,35 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     const { userId, lastSocket } = this.presence.unregister(socket.id);
     if (!userId || !lastSocket) return;
 
-    // Nothing is torn down here beyond the queue ticket: the chat service starts a
-    // reconnect grace period, because a reload must not end the conversation.
+    // The chat is *not* torn down here: the chat service starts a reconnect grace
+    // period, because a page reload must not end the conversation.
     this.chat.handleDisconnected(userId);
+
+    // The cached identity facts only exist to serve requests from this identity, so
+    // they are released once its last socket is gone. Every code path that needs them
+    // (`joinRandom`, `requestDirect`, `handleConnected`) loads them again first —
+    // which also means a reconnect always sees fresh ban/block state rather than a
+    // stale snapshot from before the disconnect.
+    this.directory.forget(userId);
+
     log.info('realtime.disconnected', { reason, remaining: this.presence.stats().sockets });
   }
 
-  private buildSessionReady(identity: AuthenticatedIdentity): ServerToClientEvents['session:ready'] extends (
-    payload: infer P,
-  ) => void
-    ? P
-    : never {
-    const state = this.chat.stateFor(identity.userId);
-
+  private buildSessionReady(
+    identity: AuthenticatedIdentity,
+    state: ChatState,
+  ): SessionReadyPayload {
     return {
       protocolVersion: PROTOCOL_VERSION,
       publicId: identity.publicId,
       identityCreatedAt: identity.identityCreatedAt.toISOString(),
-      settings: { incomingRequests: identity.incomingRequests },
+      settings: identity.settings,
+      limits: { messageMaxLength: this.config.MESSAGE_MAX_LENGTH },
       queued: state.queued,
+      // A reloaded tab has no memory of its filters; without this the waiting screen would
+      // have to show nothing (or the client's guess) while the server is matching against
+      // the real ones — and possibly dropping them one by one.
+      ...(state.queued ? { search: this.chat.searchStatus(identity.userId) } : {}),
       ...(state.activeChat ? { activeChat: buildChatView(state.activeChat, identity.userId) } : {}),
     };
   }
@@ -293,7 +335,8 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
         args,
         connectRequestSchema,
         'connectRequest',
-        (input: ConnectRequestInput, userId) => this.chat.requestDirect(userId, input.publicId, input.note),
+        (input: ConnectRequestInput, userId) =>
+          this.chat.requestDirect(userId, input.publicId, input.note),
       );
     });
 
@@ -310,15 +353,22 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     });
 
     socket.on('report:send', (...args) => {
-      void this.guard(socket, 'report:send', args, reportSchema, null, async (input: ReportInput, userId) => ({
-        reportId: await this.chat.reportChat(
-          userId,
-          input.chatId,
-          input.reason,
-          input.messageId,
-          input.details,
-        ),
-      }));
+      void this.guard(
+        socket,
+        'report:send',
+        args,
+        reportSchema,
+        null,
+        async (input: ReportInput, userId) => ({
+          reportId: await this.chat.reportChat(
+            userId,
+            input.chatId,
+            input.reason,
+            input.messageId,
+            input.details,
+          ),
+        }),
+      );
     });
 
     socket.on('block:peer', (...args) => {
@@ -388,9 +438,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       return {
         code: ErrorCode.INVALID_INPUT,
         message: errorMessage(ErrorCode.INVALID_INPUT),
-        ...(first
-          ? { context: `${first.path.join('.') || 'payload'}: ${first.message}` }
-          : {}),
+        ...(first ? { context: `${first.path.join('.') || 'payload'}: ${first.message}` } : {}),
       };
     }
 
@@ -410,11 +458,24 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
   private onAppEvent(event: AppEvent): void {
     switch (event.type) {
       case 'match.queued':
-        this.emitToUser(event.userId, 'match:queued', { queuedAt: event.since.toISOString() });
+        this.emitToUser(event.userId, 'match:queued', {
+          queuedAt: event.since.toISOString(),
+          criteria: event.criteria,
+          relaxAfterMs: event.relaxAfterMs,
+        });
         return;
 
       case 'match.cancelled':
         this.emitToUser(event.userId, 'match:cancelled', { reason: event.reason });
+        return;
+
+      case 'match.relaxed':
+        // Only ever to the waiting user: this is about *their* filters, and the peer
+        // they are about to meet has no business knowing what was dropped.
+        this.emitToUser(event.userId, 'match:relaxed', {
+          dropped: event.dropped,
+          criteria: event.criteria,
+        });
         return;
 
       case 'chat.started':
@@ -428,14 +489,6 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
             initiator: event.chat.initiatorId === userId,
           });
         }
-        return;
-
-      case 'chat.resumed':
-        this.emitToUser(event.userId, 'chat:resumed', {
-          chat: buildChatView(event.chat, event.userId),
-          messages: buildHistory(event.chat, event.userId),
-          initiator: event.chat.initiatorId === event.userId,
-        });
         return;
 
       case 'chat.message':

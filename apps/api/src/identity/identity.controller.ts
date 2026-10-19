@@ -1,5 +1,24 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, Res } from '@nestjs/common';
-import { settingsSchema, userLookupParamsSchema, type SettingsInput } from '@anonlink/shared';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
+import {
+  searchPreferencesSchema,
+  settingsSchema,
+  userLookupParamsSchema,
+  type CurrentSessionView,
+  type SessionView,
+  type SettingsUpdate,
+  type UserLookupView,
+} from '@anonlink/shared';
 import type { Request, Response } from 'express';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
@@ -11,27 +30,9 @@ import {
 } from '../common/cookies.js';
 import { RateLimitService } from '../common/rate-limit.service.js';
 import { zodBody, zodParam } from '../common/zod-validation.pipe.js';
+import { DirectoryService } from '../directory/directory.service.js';
 import { IdentityService, type AuthenticatedIdentity } from './identity.service.js';
 import { Anonymous, CurrentIdentity } from './request-context.js';
-
-/** Public representation of the caller's own identity. */
-export interface SessionView {
-  publicId: string;
-  createdAt: string;
-  sessionExpiresAt: string;
-  settings: { incomingRequests: 'everyone' | 'nobody' };
-}
-
-export interface CurrentSessionView {
-  authenticated: boolean;
-  session: SessionView | null;
-}
-
-export interface UserLookupView {
-  publicId: string;
-  exists: boolean;
-  acceptsRequests: boolean;
-}
 
 /**
  * Identity and session endpoints.
@@ -121,7 +122,7 @@ export class IdentityController {
       publicId: identity.publicId,
       createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
-      settings: { incomingRequests: identity.incomingRequests },
+      settings: identity.settings,
     };
   }
 
@@ -148,6 +149,7 @@ export class UsersController {
   constructor(
     private readonly identityService: IdentityService,
     private readonly rateLimit: RateLimitService,
+    private readonly directory: DirectoryService,
   ) {}
 
   /**
@@ -165,7 +167,10 @@ export class UsersController {
   @Get('users/:publicId')
   async lookup(
     @CurrentIdentity() identity: AuthenticatedIdentity,
-    @Param('publicId', zodParam(userLookupParamsSchema)) params: { publicId: string },
+    // No property name: Nest then hands the pipe the whole params object, which is
+    // what `userLookupParamsSchema` validates. `@Param('publicId', pipe)` would pass
+    // the bare string instead and every lookup would fail validation.
+    @Param(zodParam(userLookupParamsSchema)) params: { publicId: string },
   ): Promise<UserLookupView> {
     // Keyed by the caller so one identity cannot enumerate the ID space.
     this.rateLimit.enforce('lookup', `identity:${identity.userId}`);
@@ -181,20 +186,40 @@ export class UsersController {
   @Patch('me/settings')
   async updateSettings(
     @CurrentIdentity() identity: AuthenticatedIdentity,
-    @Body(zodBody(settingsSchema)) settings: SettingsInput,
+    @Body(zodBody(settingsSchema)) settings: SettingsUpdate,
   ): Promise<SessionView> {
+    // Filters are merged with the stored ones and validated *as a pair* before anything
+    // is written. `ageMin` and `ageMax` only mean something together, so a request that
+    // moves one bound has to be checked against the stored value of the other —
+    // validating the fragment alone would accept `ageMin: 40` on top of a stored
+    // `ageMax: 30` and leave the user with a filter nobody could ever satisfy.
+    const search = settings.search
+      ? searchPreferencesSchema.parse({ ...identity.settings.search, ...settings.search })
+      : undefined;
+
     const updated = await this.identityService.updateSettings(identity.userId, {
       ...(settings.incomingRequests ? { incomingRequests: settings.incomingRequests } : {}),
+      ...(settings.profile ? { profile: settings.profile } : {}),
+      ...(search ? { search } : {}),
     });
 
-    // `updateSettings` cannot fail here: the guard already proved the row exists.
+    // The guard already proved this identity exists, so the write cannot have missed.
     if (!updated) return this.toView(identity);
 
+    // Keep the matchmaker's synchronous view in step with what was just written. Without
+    // this, a new filter (or a new "не принимать заявки") would only take effect after
+    // the next reconnect — the classic "saved but ignored" setting.
+    this.directory.patch(identity.userId, {
+      incomingRequests: updated.incomingRequests,
+      profile: updated.profile,
+      preferences: updated.search,
+    });
+
     return {
-      publicId: updated.publicId,
-      createdAt: updated.identityCreatedAt.toISOString(),
+      publicId: identity.publicId,
+      createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
-      settings: { incomingRequests: updated.incomingRequests },
+      settings: updated,
     };
   }
 
@@ -203,7 +228,7 @@ export class UsersController {
       publicId: identity.publicId,
       createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
-      settings: { incomingRequests: identity.incomingRequests },
+      settings: identity.settings,
     };
   }
 }

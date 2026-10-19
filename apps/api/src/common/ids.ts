@@ -19,8 +19,7 @@ export const newReportId = (): string => randomUUID();
  * 32 bytes of CSPRNG output, base64url-encoded. Only its SHA-256 digest is ever
  * persisted, so a database leak cannot be replayed as a session.
  */
-export const newSessionToken = (): string =>
-  randomBytes(32).toString('base64url');
+export const newSessionToken = (): string => randomBytes(32).toString('base64url');
 
 /** SHA-256 hex digest (64 characters). */
 export const sha256Hex = (value: string): string =>

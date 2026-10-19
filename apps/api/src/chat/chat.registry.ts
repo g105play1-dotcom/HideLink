@@ -130,9 +130,7 @@ export class ChatRecord {
    * Retrying is normal (a client may resend after a reconnect), so the operation
    * is idempotent per sender instead of creating a duplicate bubble.
    */
-  append(
-    message: Omit<StoredMessage, 'readonly'>,
-  ): { message: StoredMessage; duplicate: boolean } {
+  append(message: Omit<StoredMessage, 'readonly'>): { message: StoredMessage; duplicate: boolean } {
     if (message.clientMessageId) {
       const existing = this.clientMessageIndex.get(message.clientMessageId);
       if (existing && existing.senderId === message.senderId) {
