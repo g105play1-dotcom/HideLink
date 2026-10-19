@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="AnonLink">
+  <!--
+    The application icon. Next.js serves `src/app/icon.svg` automatically, so this file
+    also removes the 404 every browser used to log for a missing /favicon.ico.
+    Colours follow the light theme's primary (`--primary`, oklch(0.52 0.19 268)).
+  -->
+  <rect width="32" height="32" rx="8" fill="#5b4bd6" />
+  <path
+    d="M9.5 12.5A3.5 3.5 0 0 1 13 9h6a3.5 3.5 0 0 1 3.5 3.5v5A3.5 3.5 0 0 1 19 21h-4.4l-3.6 3v-3h-1A3.5 3.5 0 0 1 9.5 17.5z"
+    fill="#ffffff"
+  />
+  <circle cx="13.4" cy="15" r="1.45" fill="#5b4bd6" />
+  <circle cx="16.5" cy="15" r="1.45" fill="#5b4bd6" />
+  <circle cx="19.6" cy="15" r="1.45" fill="#5b4bd6" />
+</svg>
