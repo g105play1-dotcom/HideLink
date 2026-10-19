@@ -359,7 +359,7 @@ export function SearchPreferencesPanel({ session }: { session: SessionInfo }) {
                 aria-label="Минимальный возраст"
                 className="w-24"
                 inputMode="numeric"
-                placeholder={`от ${PROFILE_LIMITS.AGE_MIN}`}
+                placeholder="от"
                 value={ageMin}
                 onChange={(event) => setAgeMin(event.target.value)}
               />
@@ -368,14 +368,14 @@ export function SearchPreferencesPanel({ session }: { session: SessionInfo }) {
                 aria-label="Максимальный возраст"
                 className="w-24"
                 inputMode="numeric"
-                placeholder={`до ${PROFILE_LIMITS.AGE_MAX}`}
+                placeholder="до"
                 value={ageMax}
                 onChange={(event) => setAgeMax(event.target.value)}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Считается по указанному году рождения, поэтому возраст приблизительный. Границы моложе{' '}
-              {PROFILE_LIMITS.AGE_MIN} лет не принимаются. Пустое поле — без ограничения.
+              Считается по указанному году рождения, поэтому возраст приблизительный. Ограничений по
+              возрасту нет: и границы, и пустое поле — ваше решение.
             </p>
           </fieldset>
 

@@ -245,10 +245,10 @@ describe('filter and profile validation', () => {
     expect(current.body.session.settings.search.ageMax).toBe(30);
   });
 
-  it('rejects a filter below the age floor, an unknown language and unknown fields', async () => {
+  it('rejects an age that cannot exist, an unknown language and unknown fields', async () => {
     const identity = await createIdentity();
 
-    expect((await patchSettingsExpectingFailure(identity, { search: { ageMin: 12 } })).status).toBe(
+    expect((await patchSettingsExpectingFailure(identity, { search: { ageMin: -1 } })).status).toBe(
       400,
     );
     expect(

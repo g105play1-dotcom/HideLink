@@ -50,9 +50,16 @@ export const PROFILE_LIMITS = {
   /** Longest accepted place name. Free text, but bounded. */
   PLACE_MAX_LENGTH: 64,
   BIRTH_YEAR_MIN: 1900,
-  /** Age filters may never target anyone below this, regardless of what is declared. */
-  AGE_MIN: 18,
-  AGE_MAX: 99,
+  /**
+   * Age-filter bounds are *technical*, not a policy.
+   *
+   * The owner decided the service imposes no age restriction: where a filter starts and
+   * ends is the user's own choice. These two numbers exist only so a value has to look
+   * like an age at all (`-1`, `1000` are refused); they do not restrict who may be
+   * searched for.
+   */
+  AGE_MIN: 0,
+  AGE_MAX: 120,
 } as const;
 
 // -----------------------------------------------------------------------------

@@ -269,6 +269,8 @@ themselves a minor. This is stated plainly rather than papered over. The alterna
 gate on the whole service, a separate minors mode, or moderation rules) are product decisions with
 legal and operational implications and are not the builder's to take silently.
 
+**Superseded by D20** — the owner took the decision on 2026-10-19.
+
 ## D19. Prettier ignores generated files
 
 **Decision.** `.prettierignore` covers build output, the lockfile and `apps/web/next-env.d.ts`.
@@ -276,3 +278,20 @@ legal and operational implications and are not the builder's to take silently.
 **Consequences.** `pnpm format:check` reflects authored code only, and does not fail depending on
 which packages happen to have been built. Formatting the lockfile would create churn on every
 install.
+
+## D20. No age restriction: the filter bounds are the user's choice (reverses D18)
+
+**Context.** D18 left the minors question open and refused to fake an age gate. The owner has now
+answered the product question directly: the chat has no age restrictions, and where the filters begin
+and end is decided by the users themselves.
+
+**Decision.** The service imposes no age policy. `PROFILE_LIMITS.AGE_MIN` and `AGE_MAX` are technical
+bounds (`0` and `120`) that only reject values which cannot be an age; they are not a rule about who
+may be searched for or who may use the service. The interface no longer claims any age limit — it says
+that both the bounds and leaving them empty are the user's own decision.
+
+**Consequences.** A self-declared minor can be matched with an adult, and declared age cannot be
+verified (there is no registration and no document check). This is now a deliberate product decision,
+recorded in `docs/PRODUCT_SPEC.md` (§ «Противоречия», п. 2) and stated plainly in `docs/SECURITY.md`
+§14. Nothing in the code pretends otherwise; if an age gate or a minors mode is wanted later, that is a
+new decision rather than a bug fix.

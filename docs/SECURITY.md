@@ -290,9 +290,11 @@ Each item says what is missing and how it would be verified. None of them is a f
    *Verify:* an external report with findings and retests.
 9. **A moderation process.** Who acts on a report, within what time, and with what authority. The
    code produces reports; nothing consumes them.
-10. **A minors policy.** Declared age is unverified and there is no age gate; see
-    `docs/PRODUCT_SPEC.md` §"Противоречия", item 2. This is a product and legal decision, currently
-    open.
+10. **No age gate, by decision.** The owner decided (2026-10-19, `docs/DECISIONS.md` D20) that the
+    service imposes no age restriction and that users choose their own filter bounds. Declared age
+    remains unverified and is not verifiable. The consequence, recorded rather than hidden: someone who
+    declares themselves a minor can be matched with an adult. If that becomes unacceptable, the options
+    are a rules/moderation policy or an age gate — neither is built, and neither is claimed here.
 11. **Log review.** `SafeLogger` structurally redacts forbidden keys, but no test asserts that a
     given code path cannot log an unexpected field. Treat log content as reviewed-by-reading only.
 12. **No CSRF token.** `SameSite=Lax` plus the Origin allow-list is the whole defence. A browser

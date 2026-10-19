@@ -267,14 +267,23 @@ describe('schemas', () => {
     expect(result.success).toBe(true);
   });
 
-  it('refuses an age filter below adulthood', () => {
-    const result = searchPreferencesSchema.safeParse({
-      ...DEFAULT_SEARCH_PREFERENCES,
-      ageMin: 12,
-      ageMax: 15,
-    });
+  it('accepts any age range, and refuses only values that are not an age', () => {
+    // The owner decided the service imposes no age restriction, so where a filter starts
+    // and ends is the user's choice. Only values that cannot be an age are refused.
+    expect(
+      searchPreferencesSchema.safeParse({
+        ...DEFAULT_SEARCH_PREFERENCES,
+        ageMin: 12,
+        ageMax: 15,
+      }).success,
+    ).toBe(true);
 
-    expect(result.success).toBe(false);
+    expect(
+      searchPreferencesSchema.safeParse({ ...DEFAULT_SEARCH_PREFERENCES, ageMin: -1 }).success,
+    ).toBe(false);
+    expect(
+      searchPreferencesSchema.safeParse({ ...DEFAULT_SEARCH_PREFERENCES, ageMax: 1000 }).success,
+    ).toBe(false);
   });
 
   it('refuses unknown languages, unknown genders and unknown fields', () => {

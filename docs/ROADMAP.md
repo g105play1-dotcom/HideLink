@@ -55,13 +55,17 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 These are recorded as open because the alternatives differ in product meaning, legal exposure and
 cost — not in code quality.
 
-1. **Minors.** Declared age is unverified and there is no registration, so no technical check is
-   possible. Options: (a) keep the current state and rely on rules + moderation; (b) restrict the
-   whole service to 18+ in the terms and enforce it by moderation; (c) build a separate
-   age-restricted mode. The current code implements (a) and labels all profile data as unverified.
-2. **Chat archives.** Keep the "transcripts are never stored" promise (current behaviour, D1), or
-   reverse it to give moderators a way to read chats. Reversing it invalidates a headline promise of
-   the product and needs its own privacy notice.
+1. **Minors — decided (2026-10-19).** The service has no age restrictions; the filter bounds are the
+   user's choice. The consequence (a self-declared minor can meet an adult, and declared age cannot be
+   verified) is recorded in `docs/PRODUCT_SPEC.md` and `docs/SECURITY.md`, and the decision itself is
+   `docs/DECISIONS.md` D20. No further input is needed unless the owner wants to revisit it.
+2. **Chat archives — decided (2026-10-19), not yet built.** The owner wants transcript storage to be
+   possible, readable only by the owner, switchable for everyone, by parameters (age, gender, city,
+   …) or for individually chosen users, with nothing said to the users about it. This reverses D1 and
+   needs its own subsystem (storage, owner access, retention, protection of the archive) plus an
+   answer to one question the code cannot invent: **how the owner authenticates**, since the product
+   has no accounts. The previous "transcripts are never stored" promise must be removed from the user
+   interface, because it would otherwise become false.
 3. **Retention defaults.** `REPORT_RETENTION_DAYS=30`, `SESSION_RETENTION_DAYS=7`,
    `SECURITY_EVENT_RETENTION_DAYS=90` are placeholders chosen for reasonableness, not for any
    jurisdiction. They may need to match local law.
