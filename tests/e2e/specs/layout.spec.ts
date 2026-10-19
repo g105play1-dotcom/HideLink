@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { closeSettings, newIdentity, openSettings, settingsToggle } from '../support/app';
 
@@ -22,7 +22,7 @@ import { closeSettings, newIdentity, openSettings, settingsToggle } from '../sup
 test.use({ viewport: { width: 390, height: 844 } });
 
 /** Whoever is wider than the window, or `null`. Reported so a failure names the culprit. */
-async function horizontalOverflow(page: import('@playwright/test').Page): Promise<string | null> {
+async function horizontalOverflow(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const viewport = document.documentElement.clientWidth;
     if (document.documentElement.scrollWidth <= viewport + 1) return null;
