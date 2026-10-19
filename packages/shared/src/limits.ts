@@ -43,13 +43,7 @@ export type ChatKind = 'random' | 'direct';
 export const CHAT_KINDS: readonly ChatKind[] = ['random', 'direct'];
 
 export type ChatEndReason =
-  | 'left'
-  | 'peer_left'
-  | 'disconnected'
-  | 'blocked'
-  | 'reported'
-  | 'server_shutdown'
-  | 'expired';
+  'left' | 'peer_left' | 'disconnected' | 'blocked' | 'reported' | 'server_shutdown' | 'expired';
 
 export const CHAT_END_REASONS: readonly ChatEndReason[] = [
   'left',

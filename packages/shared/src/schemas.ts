@@ -9,6 +9,7 @@ import {
   MESSAGE_MIN_LENGTH,
   REPORT_REASONS,
 } from './limits.js';
+import type { SettingsUpdate } from './preferences.js';
 
 /**
  * Validation schemas shared by the REST API, the WebSocket gateway and the web
@@ -120,16 +121,19 @@ export const blockSchema = z.object({ publicId: publicIdSchema }).strict();
  */
 export const blockPeerSchema = z.object({ chatId: chatIdSchema }).strict();
 
-/** REST: PATCH /api/v1/me/settings */
-export const settingsSchema = z
-  .object({
-    incomingRequests: z.enum(['everyone', 'nobody']).optional(),
-  })
-  .strict();
+/**
+ * REST: `PATCH /api/v1/me/settings`.
+ *
+ * Declared in `preferences.ts` together with the profile and filter schemas it composes,
+ * and re-exported here under its original name: one endpoint, one schema. Two definitions
+ * of the same request body are how a field ends up accepted by one surface and rejected
+ * by the other.
+ */
+export { settingsUpdateSchema as settingsSchema } from './preferences.js';
 
 export type PublicId = z.infer<typeof publicIdSchema>;
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>;
 export type ConnectRequestInput = z.infer<typeof connectRequestSchema>;
 export type ConnectRespondInput = z.infer<typeof connectRespondSchema>;
 export type ReportInput = z.infer<typeof reportSchema>;
-export type SettingsInput = z.infer<typeof settingsSchema>;
+export type SettingsInput = SettingsUpdate;

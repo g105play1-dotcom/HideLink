@@ -5,8 +5,10 @@ import type {
   ConnectRequestInput,
   ConnectRespondInput,
   ErrorCode,
-  IncomingRequestPolicy,
+  IdentitySettingsView,
+  RelaxableCriterion,
   ReportInput,
+  SearchPreferences,
 } from '@anonlink/shared';
 
 /**
@@ -32,9 +34,13 @@ export type AckResult<T> = { ok: true; data: T } | { ok: false; error: ErrorPayl
 
 export type AckHandler<T> = (result: AckResult<T>) => void;
 
-export interface IdentitySettings {
-  incomingRequests: IncomingRequestPolicy;
-}
+/**
+ * The identity's own settings, exactly as the REST surface returns them.
+ *
+ * Aliased rather than re-declared: the socket and REST describe the same object, and two
+ * declarations would drift the first time a field is added to one of them.
+ */
+export type IdentitySettings = IdentitySettingsView;
 
 /** How a peer is presented to this client. */
 export interface PeerView {
@@ -76,13 +82,50 @@ export interface SessionReadyPayload {
   publicId: string;
   identityCreatedAt: string;
   settings: IdentitySettings;
+  /**
+   * Effective server limits.
+   *
+   * `messageMaxLength` is configurable per deployment, so the composer reads it from
+   * here instead of hard-coding a number that could disagree with the server and
+   * leave the user guessing why a message was rejected.
+   */
+  limits: { messageMaxLength: number };
   /** State the server already holds for this identity, so a reconnect is lossless. */
   queued: boolean;
+  /**
+   * The filters a running search is being matched with, and when they will be widened.
+   *
+   * Present only while `queued`. A reloaded tab has no memory of what it asked for, and
+   * without this the waiting screen could not say which filters are in force — it would
+   * have to show either nothing or the client's guess, and a guess is exactly what the
+   * user must never be shown while the server is quietly dropping filters.
+   */
+  search?: SearchStatusPayload;
   activeChat?: ChatView;
 }
 
-export interface MatchQueuedPayload {
+/** What the server is applying to a search, and when it will start widening it. */
+export interface SearchStatusPayload {
+  criteria: SearchPreferences;
+  /** Milliseconds from now until the next filter is dropped, or `null` for never. */
+  relaxAfterMs: number | null;
+}
+
+export interface MatchQueuedPayload extends SearchStatusPayload {
   queuedAt: string;
+}
+
+/**
+ * Filters were dropped to widen a long search.
+ *
+ * Sent to the waiting user only, and only when they explicitly allowed it. `dropped`
+ * names exactly what no longer applies, so the interface can say "ищем без фильтра по
+ * языку" instead of silently handing over a partner outside the requested range.
+ */
+export interface MatchRelaxedPayload {
+  dropped: RelaxableCriterion[];
+  /** The criteria now in force. */
+  criteria: SearchPreferences;
 }
 
 export type MatchCancelReason = 'user' | 'timeout' | 'chat_started';
@@ -200,7 +243,10 @@ export interface ClientToServerEvents {
   'match:join': (ack?: AckHandler<MatchJoinResult>) => void;
   'match:cancel': (ack?: AckHandler<MatchCancelResult>) => void;
   'chat:message': (payload: ChatMessageInput, ack?: AckHandler<ChatMessageResult>) => void;
-  'chat:leave': (payload: { chatId: string; findNext?: boolean }, ack?: AckHandler<ChatLeaveResult>) => void;
+  'chat:leave': (
+    payload: { chatId: string; findNext?: boolean },
+    ack?: AckHandler<ChatLeaveResult>,
+  ) => void;
   'chat:next': (payload: { chatId: string }, ack?: AckHandler<ChatNextResult>) => void;
   'request:send': (payload: ConnectRequestInput, ack?: AckHandler<SendRequestResult>) => void;
   'request:respond': (payload: ConnectRespondInput, ack?: AckHandler<RespondRequestResult>) => void;
@@ -214,6 +260,7 @@ export interface ServerToClientEvents {
   'session:rotated': (payload: { publicId: string }) => void;
   'match:queued': (payload: MatchQueuedPayload) => void;
   'match:cancelled': (payload: MatchCancelledPayload) => void;
+  'match:relaxed': (payload: MatchRelaxedPayload) => void;
   'chat:started': (payload: ActiveChatPayload) => void;
   'chat:resumed': (payload: ActiveChatPayload) => void;
   'chat:message': (payload: ChatMessageView) => void;

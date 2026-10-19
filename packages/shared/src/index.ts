@@ -1,4 +1,6 @@
 export * from './errors.js';
 export * from './ids.js';
 export * from './limits.js';
+export * from './preferences.js';
+export * from './rest.js';
 export * from './schemas.js';

@@ -28,6 +28,8 @@ export const ErrorCode = {
   BLOCKED: 'BLOCKED',
   UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT',
   FORBIDDEN_ORIGIN: 'FORBIDDEN_ORIGIN',
+  ROUTE_NOT_FOUND: 'ROUTE_NOT_FOUND',
+  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
   DATABASE_UNAVAILABLE: 'DATABASE_UNAVAILABLE',
 } as const;
@@ -58,6 +60,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   BLOCKED: 'Communication with this user is not possible.',
   UNSUPPORTED_EVENT: 'Unsupported event.',
   FORBIDDEN_ORIGIN: 'This origin is not allowed to connect.',
+  ROUTE_NOT_FOUND: 'This endpoint does not exist.',
+  PAYLOAD_TOO_LARGE: 'The request body is too large.',
   INTERNAL_ERROR: 'Something went wrong. Please try again.',
   DATABASE_UNAVAILABLE: 'The service is temporarily unavailable.',
 };

@@ -41,6 +41,13 @@ export const ServerEvent = {
   MatchQueued: 'match:queued',
   /** The socket was removed from the queue without a match. */
   MatchCancelled: 'match:cancelled',
+  /**
+   * Filters were dropped to widen a search that is taking a long time.
+   *
+   * Sent instead of a silent widening: the user chose those filters, so the server tells
+   * them what it stopped applying rather than quietly handing over someone outside them.
+   */
+  MatchRelaxed: 'match:relaxed',
   /** A new chat started (random match or accepted direct request). */
   ChatStarted: 'chat:started',
   /** An already-active chat was re-attached after a reconnect. */

@@ -54,7 +54,9 @@ describe('chatMessageSchema', () => {
   });
 
   it('rejects a non-UUID chat id', () => {
-    expect(chatMessageSchema.safeParse({ ...valid, chatId: '../../etc/passwd' }).success).toBe(false);
+    expect(chatMessageSchema.safeParse({ ...valid, chatId: '../../etc/passwd' }).success).toBe(
+      false,
+    );
     expect(chatMessageSchema.safeParse({ ...valid, chatId: 'chat_12345678' }).success).toBe(false);
   });
 });
