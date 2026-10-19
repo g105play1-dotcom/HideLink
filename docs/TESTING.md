@@ -27,16 +27,16 @@ the E2E package used to answer to `test`).
 | --- | --- | --- | --- |
 | `packages/shared` | 4 | **74** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 11 | **147** | 26 unit + 121 integration |
+| `apps/api` | 11 | **148** | 26 unit + 122 integration |
 | `tests/e2e` | 6 | **20** | browser, two independent contexts |
-| **Total** | **22** | **249** | |
+| **Total** | **22** | **250** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
 without a server; the nine integration files start a **real API process on port 3101** against the
 `*_test` database.
 
 **Last full run (2026-10-19, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `20 passed (1.8m)`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `20 passed (1.7m)`. The browser suite
 is not decoration — the run before it failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
@@ -70,7 +70,7 @@ Each file below runs against the live process; the descriptions are the guarante
 
 | File | Tests | What it guarantees |
 | --- | --- | --- |
-| `rest.test.ts` | 35 | Session lifecycle (HttpOnly cookie, hash-only storage, idempotency, forged cookie → new identity, rotation on `DELETE`), `GET /users/:publicId` never disclosing presence/ban/age, settings validation, blocks (idempotent, self-block refused, no third-party leak), security headers, error-shape consistency |
+| `rest.test.ts` | 36 | Session lifecycle (HttpOnly cookie, hash-only storage, idempotency, forged cookie → new identity, rotation on `DELETE`), `GET /users/:publicId` never disclosing presence/ban/age, settings validation, blocks (idempotent, self-block refused, no third-party leak), security headers, error-shape consistency, and the **CORS preflight allows every method the REST surface uses** (the list is enforced by the browser, not the server — a method missing from it makes a route fail with `net::ERR_FAILED` and no server log line) |
 | `chat.test.ts` | 13 | Bidirectional delivery with per-recipient labels, ordering, length limits (exact-limit ok, over-limit refused), empty refused, `clientMessageId` dedup, non-participant refused, end-for-both, `chat:next`, reconnect within grace, end after grace, second tab isolation |
 | `matching.test.ts` | 8 | Two waiters paired into one chat, **no identity in two chats at once**, never matching itself from two sockets, peer User ID never leaked, cancel removes from queue, re-match after leave, disconnected identity dropped, unknown event answered |
 | `direct.test.ts` | 15 | Direct request delivery (sender ID disclosed because it is reciprocal), note length, unknown/self/malformed target, offline target, requests-off target, **blocked target refused without saying so**, blocked while in a chat, cancel on disconnect; accept (both IDs revealed), decline, wrong addressee, double answer, second-chat refusal |
@@ -179,7 +179,11 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
 14. **The owner's `/admin` page has no automated test.** Its API is covered by `archive.test.ts`, but
     no browser ever opens the page, types the key, saves a policy or reads a transcript. It is verified
     by hand. A spec with a second context (the owner) alongside a pair of users is the obvious next
-    test, and it is listed as a gap rather than implied to work.
+    test, and it is listed as a gap rather than implied to work. That gap has already cost twice: using
+    the page by hand found that `PUT` was missing from the CORS method list (so "Сохранить" failed with
+    `net::ERR_FAILED` while every server-side test passed) and that the key was demanded again after
+    every reload although the cookie was still valid. Both were fixed; neither would have been caught
+    by the suites as they stood.
 
 ## 7. Reading a failure
 

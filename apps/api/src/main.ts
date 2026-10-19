@@ -47,10 +47,15 @@ async function bootstrap(): Promise<void> {
   app.useBodyParser('json', { limit: '64kb' });
   app.useBodyParser('urlencoded', { limit: '16kb', extended: false });
 
+  // The browser enforces this list through the CORS preflight, not the server: a method
+  // missing here makes the real request fail with `net::ERR_FAILED` and leaves no line in
+  // the server log, so the feature simply looks broken. It must therefore name every
+  // method the REST surface actually exposes — `PUT` is the owner's archive policy,
+  // `DELETE` removes a transcript, `POST` creates a session.
   app.enableCors({
     origin: [...config.CORS_ORIGINS],
     credentials: true,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['content-type'],
     maxAge: 600,
   });

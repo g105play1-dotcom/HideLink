@@ -483,6 +483,29 @@ describe('unknown routes, headers and CORS', () => {
     expect(response.headers.get('access-control-allow-credentials')).toBe('true');
   });
 
+  it('lets the browser preflight every method the REST surface uses', async () => {
+    // The browser, not the server, enforces this list. A method missing from
+    // `access-control-allow-methods` makes the real request fail with `net::ERR_FAILED`
+    // and leaves nothing in the server log, so a route can be fully implemented, fully
+    // tested server-side, and still be a dead button. That happened once: `PUT` (the
+    // owner's archive policy) was absent from the list.
+    for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      const response = await fetch('http://127.0.0.1:3101/api/v1/me/settings', {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'http://localhost:3000',
+          'access-control-request-method': method,
+        },
+      });
+
+      const allowed = (response.headers.get('access-control-allow-methods') ?? '')
+        .split(',')
+        .map((entry) => entry.trim());
+
+      expect(allowed, `preflight should allow ${method}`).toContain(method);
+    }
+  });
+
   it('does not accept a JSON body that is not an object', async () => {
     const owner = await createIdentity();
 
