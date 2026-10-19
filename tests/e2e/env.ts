@@ -77,6 +77,16 @@ function resolveE2eDatabaseUrl(): string {
 export const E2E_DATABASE_URL = resolveE2eDatabaseUrl();
 
 /**
+ * The owner's key for this stack.
+ *
+ * Pinned here rather than inherited from the developer's `.env`, for the same reason the
+ * integration suite pins its own: the owner surface does not exist without a key, so an
+ * inherited — or absent — value would make the admin spec pass or fail per machine. It is
+ * a constant in the test stack and never reaches a real deployment.
+ */
+export const E2E_ADMIN_TOKEN = 'e2e-owner-key-not-a-real-secret-0001';
+
+/**
  * Environment for the spawned API.
  *
  * Deliberately different from development in three ways: the message limit is small, so
@@ -114,6 +124,11 @@ const E2E_ENV: Readonly<Record<string, string>> = Object.freeze({
   REPORT_RETENTION_DAYS: '30',
   SESSION_RETENTION_DAYS: '7',
   SECURITY_EVENT_RETENTION_DAYS: '90',
+
+  // The owner's archive page is part of the product surface, so the browser suite needs a
+  // key to open it. The archive itself stays off: each admin spec switches it on for its
+  // own scenario and puts it back (see `support/owner.ts`).
+  ADMIN_TOKEN: E2E_ADMIN_TOKEN,
 
   TRUST_PROXY: 'false',
 });

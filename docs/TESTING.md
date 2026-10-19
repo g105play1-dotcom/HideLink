@@ -28,8 +28,8 @@ the E2E package used to answer to `test`).
 | `packages/shared` | 4 | **74** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
 | `apps/api` | 11 | **148** | 26 unit + 122 integration |
-| `tests/e2e` | 6 | **20** | browser, two independent contexts |
-| **Total** | **22** | **250** | |
+| `tests/e2e` | 7 | **23** | browser, two independent contexts |
+| **Total** | **23** | **253** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
 without a server; the nine integration files start a **real API process on port 3101** against the
@@ -89,12 +89,14 @@ elsewhere — see §6.
 `match:cancel` and `chat:leave` in `afterEach`; otherwise the next test's first joiner receives the
 leftover waiter and the failure looks like a filter bug.
 
-## 5. End-to-end suites (`tests/e2e`, two independent browser contexts)
+## 5. End-to-end suites (`tests/e2e`, one independent browser context per participant)
 
 Playwright spawns its own stack — API on **3201**, web on **3200**, `*_test` database — in
 `tests/e2e/global-setup.ts`. There is no Playwright `webServer`, so those ports must be free, and
 `workers: 1` because matchmaking is global. Only two non-semantic hooks are permitted (`#own-user-id`
-and `data-chat-id`); everything else is a real ARIA role or visible Russian text.
+and `data-chat-id`); everything else is a real ARIA role or visible Russian text. The stack pins
+`ADMIN_TOKEN` (`tests/e2e/env.ts`) rather than inheriting one, so the owner's page is reachable in
+exactly one, non-secret, machine-independent way.
 
 | Spec | Tests | Focus |
 | --- | --- | --- |
@@ -104,6 +106,16 @@ and `data-chat-id`); everything else is a real ARIA role or visible Russian text
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
+| `admin.spec.ts` | 3 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept |
+
+`admin.spec.ts` is the newest, and it was written *after* the fact rather than before it. Using the
+owner's page by hand found two defects that no suite could see, because the defects lived exactly where
+the suites were blind: `PUT` was missing from the CORS method list (the browser refused the request with
+`net::ERR_FAILED`; CORS is enforced by the browser, and the integration test never sent an `Origin`, so it
+never triggered a preflight), and the page demanded the key again after every reload although the server
+still trusted its cookie. Both are fixed — `rest.test.ts` now asks for the preflight of every method the
+REST surface uses, and the page asks the server whether it is already signed in — and `admin.spec.ts`
+fails if either comes back.
 
 One of these tests found a defect rather than confirming one. `filters.spec.ts` asserts that immediately
 after "start search" the screen shows the criteria the *server* reported (`Пол: Женский`). It failed
@@ -176,14 +188,14 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
     exist here.
 13. **Web has no unit tests.** The Zustand store and the client state machine (`anonymous-client.ts`)
     are exercised only through E2E; there is no isolated test of their transitions.
-14. **The owner's `/admin` page has no automated test.** Its API is covered by `archive.test.ts`, but
-    no browser ever opens the page, types the key, saves a policy or reads a transcript. It is verified
-    by hand. A spec with a second context (the owner) alongside a pair of users is the obvious next
-    test, and it is listed as a gap rather than implied to work. That gap has already cost twice: using
-    the page by hand found that `PUT` was missing from the CORS method list (so "Сохранить" failed with
-    `net::ERR_FAILED` while every server-side test passed) and that the key was demanded again after
-    every reload although the cookie was still valid. Both were fixed; neither would have been caught
-    by the suites as they stood.
+14. **The owner's `/admin` page is covered in a browser, partly.** `admin.spec.ts` drives the whole
+    journey — key, policy, recording, reading a transcript, deleting — but the `criteria` and
+    `selected` audiences are only exercised at the API level (`archive.test.ts`); no browser test
+    picks a person by search. The page also has no coverage of its own error paths beyond a wrong key,
+    and no accessibility audit (see item 4). Writing this spec was itself the response to two defects
+    that using the page by hand had found: `PUT` was missing from the CORS method list (so "Сохранить"
+    failed with `net::ERR_FAILED` while every server-side test passed) and the key was demanded again
+    after a reload although the cookie was still valid. `admin.spec.ts` now fails if either returns.
 
 ## 7. Reading a failure
 
