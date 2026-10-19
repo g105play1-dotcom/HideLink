@@ -9,11 +9,13 @@ const ignored = [
   '**/node_modules/**',
   '**/dist/**',
   '**/.next/**',
+  '**/.next-e2e/**',
   '**/generated/**',
   '**/coverage/**',
   '**/.turbo/**',
   '**/playwright-report/**',
   '**/test-results/**',
+  '**/.results/**',
   '**/*.d.ts',
 ];
 
@@ -77,7 +79,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.{mjs,cjs,js}'],
+    files: ['**/*.{mjs,cjs,js}', 'tests/e2e/**/*.ts'],
     rules: { 'no-console': 'off' },
   },
   prettier,

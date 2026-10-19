@@ -1,0 +1,221 @@
+# =============================================================================
+# Continuous integration for AnonLink.
+#
+#   quality     — lint, formatting, types, build, unit tests
+#   integration — the API integration suite against a real PostgreSQL
+#   e2e         — the browser journeys (spawns the whole stack on ports 3200/3201)
+#   security    — dependency audit
+#
+# There is deliberately no deployment job: nothing in this repository may
+# publish, migrate or change a remote resource on its own.
+#
+# HONESTY NOTE: this workflow has never been executed. The repository has no
+# remote and the project was built and verified on Windows 10 with a native
+# PostgreSQL 18 install, so the only checks that are known to pass are the local
+# commands `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`,
+# `pnpm build` and `pnpm test:e2e`. See docs/TESTING.md.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suites derive their own `*_test` database from this value
+  # (apps/api/test/support/test-env.ts and tests/e2e/env.ts). The role below is the
+  # throwaway one created by the service container, never a real credential.
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/anonlink?schema=public
+  # Deterministic pnpm behaviour without touching the developer's own config.
+  CI: 'true'
+
+jobs:
+  quality:
+    name: Lint, types, build, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        # `pnpm build` for the API runs `scripts/ensure-database.mjs` first, so the
+        # build needs a reachable server even before any test runs.
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: anonlink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Formatting
+        run: pnpm format:check
+
+      - name: Types
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit tests (shared + protocol)
+        run: |
+          pnpm --filter @anonlink/shared test
+          pnpm --filter @anonlink/protocol test
+
+  integration:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: anonlink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The suite's own global setup creates the `*_test` database, applies the
+      # committed migrations and spawns the API on port 3101. It refuses to run
+      # against anything that is not a `*_test` database.
+      - name: Integration tests
+        run: pnpm --filter @anonlink/api test
+
+      - name: Upload the API's own output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-output
+          path: |
+            apps/api/*.log
+            tests/e2e/.results/**
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: quality
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: anonlink
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @anonlink/e2e exec playwright install --with-deps chromium
+
+      # `pnpm test:e2e` builds the API and the web bundle (.next-e2e), applies the
+      # migrations, starts both servers on 3200/3201 and tears them down afterwards.
+      - name: End-to-end tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            tests/e2e/playwright-report/**
+            tests/e2e/test-results/**
+            tests/e2e/.results/**
+          if-no-files-found: ignore
+
+  security:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Needs access to the npm registry. A high-severity advisory fails the job on
+      # purpose: it is a signal to be read, not a warning to be scrolled past.
+      - name: Audit
+        run: pnpm audit --audit-level high

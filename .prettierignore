@@ -1,7 +1,16 @@
 node_modules/
 dist/
 .next/
+.next-e2e/
 generated/
 coverage/
 .turbo/
+playwright-report/
+test-results/
+.results/
 *.md
+
+# Generated, not authored: formatting them would create churn on every install/build
+# and would make `pnpm format:check` depend on which packages happened to be built.
+pnpm-lock.yaml
+apps/web/next-env.d.ts

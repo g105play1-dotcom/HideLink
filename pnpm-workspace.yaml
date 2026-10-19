@@ -14,4 +14,9 @@ allowBuilds:
   esbuild: true
 
 # Keep peer resolution predictable in a mixed ESM monorepo.
+minimumReleaseAgeExclude:
+  - '@tanstack/query-core@5.104.4'
+  - '@tanstack/react-query@5.104.4'
+  - lucide-react@1.59.0
+
 strictPeerDependencies: false

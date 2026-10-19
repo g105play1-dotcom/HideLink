@@ -21,6 +21,10 @@ playwright-report/
 test-results/
 blob-report/
 
+# End-to-end stack: its own Next.js build, its logs and its Playwright report
+.next-e2e/
+tests/e2e/.results/
+
 # Tooling caches
 .turbo/
 .eslintcache
