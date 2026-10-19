@@ -5,10 +5,12 @@ import {
   activeFilterCount,
   activeRelaxationOrder,
   ageFromBirthYear,
+  birthYearFromAge,
   hasActiveFilters,
   mutuallyCompatible,
   normalizePlace,
   preferencesFit,
+  profileUpdateSchema,
   relaxBySteps,
   relaxationStage,
   searchPreferencesSchema,
@@ -50,6 +52,21 @@ describe('ageFromBirthYear', () => {
   it('is year-granular, matching what the user actually typed', () => {
     expect(ageFromBirthYear(1990, NOW)).toBe(36);
     expect(ageFromBirthYear(2000, NOW)).toBe(26);
+  });
+});
+
+describe('birthYearFromAge', () => {
+  it('round-trips through the age, so the interface can ask for an age', () => {
+    // The settings screen shows "Возраст", the column keeps a year. This is the one
+    // conversion between them, and it has to be exact for the two to agree.
+    for (const age of [18, 25, 40, 99]) {
+      expect(ageFromBirthYear(birthYearFromAge(age, NOW), NOW)).toBe(age);
+    }
+  });
+
+  it('does not go stale: the same stored year reads one older next year', () => {
+    const stored = birthYearFromAge(25, NOW);
+    expect(ageFromBirthYear(stored, new Date('2027-06-01T00:00:00.000Z'))).toBe(26);
   });
 });
 
@@ -256,7 +273,7 @@ describe('relaxation', () => {
 describe('schemas', () => {
   it('accepts a full set of preferences', () => {
     const result = searchPreferencesSchema.safeParse({
-      genders: ['female', 'other'],
+      genders: ['female', 'male'],
       ageMin: 18,
       ageMax: 99,
       location: 'region',
@@ -290,6 +307,14 @@ describe('schemas', () => {
     expect(searchPreferencesUpdateSchema.safeParse({ languages: ['klingon'] }).success).toBe(false);
     expect(searchPreferencesUpdateSchema.safeParse({ genders: ['elf'] }).success).toBe(false);
     expect(searchPreferencesUpdateSchema.safeParse({ nested: {} }).success).toBe(false);
+  });
+
+  it('no longer accepts "other" as a gender', () => {
+    // Removed from the vocabulary on the owner's instruction (docs/DECISIONS.md D22).
+    // The refusal is what keeps a hand-written request from re-introducing a value the
+    // interface can no longer clear.
+    expect(profileUpdateSchema.safeParse({ gender: 'other' }).success).toBe(false);
+    expect(searchPreferencesUpdateSchema.safeParse({ genders: ['other'] }).success).toBe(false);
   });
 
   it('accepts clearing a field with null but not with a blank string', () => {

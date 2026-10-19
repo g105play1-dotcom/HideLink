@@ -469,6 +469,7 @@ class AnonymousClient {
       publicId: payload.publicId,
       createdAt: payload.identityCreatedAt,
       incomingRequests: payload.settings.incomingRequests,
+      blockingEnabled: payload.settings.blockingEnabled,
       profile: payload.settings.profile,
       search: payload.settings.search,
     });
@@ -614,6 +615,7 @@ class AnonymousClient {
       publicId: session.publicId,
       createdAt: session.createdAt,
       incomingRequests: session.settings.incomingRequests,
+      blockingEnabled: session.settings.blockingEnabled,
       profile: session.settings.profile,
       search: session.settings.search,
     };

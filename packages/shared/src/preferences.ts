@@ -29,7 +29,16 @@ import { z } from 'zod';
 // Vocabularies
 // -----------------------------------------------------------------------------
 
-export const GENDERS = ['female', 'male', 'other'] as const;
+/**
+ * Declared genders.
+ *
+ * `other` was removed on the owner's instruction (docs/DECISIONS.md D22): the interface
+ * offered it as a third chip, and almost nobody picked it, while it made every gender
+ * filter a three-way choice. Values already stored as `other` are not rewritten — the
+ * read paths narrow them through {@link isGender}, so they degrade to "not stated",
+ * which never satisfies a filter (fail-closed, see the module comment).
+ */
+export const GENDERS = ['female', 'male'] as const;
 export type Gender = (typeof GENDERS)[number];
 
 /**
@@ -233,6 +242,15 @@ export const searchPreferencesUpdateSchema = z
 export const settingsUpdateSchema = z
   .object({
     incomingRequests: z.enum(['everyone', 'nobody']).optional(),
+    /**
+     * Whether the caller wants the "block" action at all.
+     *
+     * The block *feature* is optional in the product (the owner's instruction, see
+     * docs/DECISIONS.md D24): turning it off hides the action and refuses new blocks,
+     * but never removes an existing block — silently un-blocking somebody the user had
+     * blocked would be a safety regression, so the stored blocks stay in force.
+     */
+    blockingEnabled: z.boolean().optional(),
     profile: profileUpdateSchema.optional(),
     search: searchPreferencesUpdateSchema.optional(),
   })
@@ -268,6 +286,22 @@ export function normalizePlace(value: string | null | undefined): string | null 
  */
 export function ageFromBirthYear(birthYear: number, now: Date = new Date()): number {
   return now.getUTCFullYear() - birthYear;
+}
+
+/**
+ * Year of birth for an age the user typed.
+ *
+ * The interface asks for an *age* because that is what a person knows about themselves
+ * without arithmetic, but a stored age silently goes stale: someone who entered "25" in
+ * 2026 would still read as 25 in 2030, and every age filter would quietly be wrong. The
+ * conversion happens once, at the edge, so the stored value stays correct forever and
+ * the matchmaker, the filters and the relaxation ladder are untouched.
+ *
+ * See docs/DECISIONS.md D22 for why the field is labelled "Возраст" while the database
+ * column stays `declaredBirthYear`.
+ */
+export function birthYearFromAge(age: number, now: Date = new Date()): number {
+  return now.getUTCFullYear() - Math.round(age);
 }
 
 /**

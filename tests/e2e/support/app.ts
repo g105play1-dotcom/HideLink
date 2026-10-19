@@ -148,21 +148,35 @@ export async function expectMessage(page: Page, text: string): Promise<void> {
   await expect(transcript(page)).toContainText(text, { timeout: 20_000 });
 }
 
-/** Switches to the "write by User ID" tab. */
-export async function openDirectTab(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: 'По User ID', exact: true }).click();
+/** The disclosure that reveals the filters. */
+export function settingsToggle(page: Page) {
+  return page.getByRole('button', { name: 'Настройки', exact: true });
 }
 
-/** Switches to the settings tab. */
-export async function openSettingsTab(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: 'Настройки', exact: true }).click();
+/**
+ * Opens the settings disclosure.
+ *
+ * Idempotent on purpose: it used to be a tab switch, and a test that opens the settings
+ * twice would close them again now that the same control toggles. `aria-expanded` is the
+ * state the interface itself relies on, so waiting for it keeps the assertion honest.
+ */
+export async function openSettings(page: Page): Promise<void> {
+  const toggle = settingsToggle(page);
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 }
 
-/** Looks a User ID up: switch to the tab, type it, press the check button. */
+/** Closes the settings disclosure, so the idle screen's own summary is the only one. */
+export async function closeSettings(page: Page): Promise<void> {
+  const toggle = settingsToggle(page);
+  if ((await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+}
+
+/** Looks a User ID up: fill the field under the header, press "Найти". */
 export async function lookupUser(page: Page, publicId: string): Promise<void> {
-  await openDirectTab(page);
   await page.locator('#target-user-id').fill(publicId);
-  await page.getByRole('button', { name: 'Проверить', exact: true }).click();
+  await page.getByRole('button', { name: 'Найти', exact: true }).click();
 }
 
 /**

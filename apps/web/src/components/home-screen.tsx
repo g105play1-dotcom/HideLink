@@ -1,47 +1,36 @@
 'use client';
 
-import {
-  LoaderCircle,
-  MessageSquare,
-  RefreshCw,
-  Search,
-  Settings,
-  TriangleAlert,
-  UserSearch,
-} from 'lucide-react';
+import { LoaderCircle, MessageSquare, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
+import { AdSlot } from '@/components/ad-slot';
 import { BlockDialog } from '@/components/block-dialog';
 import { ChatPanel } from '@/components/chat-panel';
 import { ConnectionBadge } from '@/components/connection-badge';
-import { DirectPanel } from '@/components/direct-panel';
-import { IdentityCard } from '@/components/identity-card';
+import { DirectSearch } from '@/components/direct-search';
+import { IdentityStrip } from '@/components/identity-strip';
 import { IncomingRequestDialog } from '@/components/incoming-request-dialog';
-import { PreferencesPanel } from '@/components/preferences-panel';
 import { ReportDialog } from '@/components/report-dialog';
 import { SearchPanel } from '@/components/search-panel';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { Toaster } from '@/components/toaster';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { client } from '@/lib/anonymous-client';
-import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store/app-store';
 
-type Tab = 'search' | 'direct' | 'settings';
-
-const TABS: Array<{ id: Tab; label: string; icon: typeof Search }> = [
-  { id: 'search', label: 'Случайный чат', icon: Search },
-  { id: 'direct', label: 'По User ID', icon: UserSearch },
-  { id: 'settings', label: 'Настройки', icon: Settings },
-];
-
 /**
- * The whole application screen.
+ * The whole application screen — one page.
  *
- * It is a pure function of the store's `phase`, which is why the phases are modelled
- * explicitly on the store rather than inferred from a handful of booleans: an
- * impossible combination (searching *and* chatting) cannot be represented.
+ * It used to be three tabs (random chat, by User ID, settings), which meant the two
+ * things a user can *do* were hidden behind a mode switch, and the identity card took the
+ * top third of every screen. The owner asked for one page with the identity in the header
+ * and the ID search directly under it (docs/DECISIONS.md D22).
+ *
+ * The screen is a pure function of the store's `phase`, which is why the phases are
+ * modelled explicitly rather than inferred from a handful of booleans: an impossible
+ * combination (searching *and* chatting) cannot be represented.
  */
 export function HomeScreen() {
   const connection = useAppStore((state) => state.connection);
@@ -52,7 +41,6 @@ export function HomeScreen() {
   const phase = useAppStore((state) => state.phase);
   const chat = useAppStore((state) => state.chat);
 
-  const [tab, setTab] = useState<Tab>('search');
   const [reporting, setReporting] = useState(false);
   const [blocking, setBlocking] = useState(false);
   const [retrying, setRetrying] = useState(false);
@@ -71,100 +59,98 @@ export function HomeScreen() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
-      <header className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <MessageSquare className="size-5" aria-hidden="true" />
-          </span>
-          <div className="flex flex-col">
-            <h1 className="text-lg leading-tight font-semibold">AnonLink</h1>
-            <p className="text-xs text-muted-foreground">Анонимный чат без регистрации</p>
+    /*
+      A three-column shell: a content column flanked by two reserved advertising rails
+      (docs/DECISIONS.md D23). The rails only exist on wide screens, and they are empty
+      today — the point is that filling them later moves no existing element.
+    */
+    <div className="mx-auto flex w-full max-w-[1360px] items-stretch gap-4 px-3 sm:px-5">
+      <AdRail side="left" />
+
+      <div className="mx-auto flex min-h-dvh w-full max-w-[900px] min-w-0 flex-col gap-3 py-3 sm:py-4">
+        <header className="flex flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-border pb-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2">
+            <div className="flex items-center gap-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <MessageSquare className="size-4" aria-hidden="true" />
+              </span>
+              <h1 className="text-lg leading-none font-semibold">AnonLink</h1>
+            </div>
+
+            {session ? <IdentityStrip session={session} /> : <IdentitySkeleton />}
           </div>
-        </div>
 
-        <ConnectionBadge />
-      </header>
+          <div className="flex items-center gap-2">
+            <ConnectionBadge />
+            <ThemeToggle />
+          </div>
+        </header>
 
-      {protocolMismatch ? (
-        <Card className="border-destructive/50">
-          <CardContent className="flex items-start gap-3 pt-4 sm:pt-5">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-            <p className="text-sm" role="alert">
-              Сервер работает по другой версии протокола. Обновите страницу — иначе сообщения могут
-              теряться.
-            </p>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <main id="main" className="flex min-h-0 flex-1 flex-col gap-4">
-        {!reachable && !session ? (
-          <UnavailableState
-            title={connection === 'rejected' ? 'Доступ закрыт' : 'Нет связи с сервером'}
-            detail={connectionDetail ?? bootError ?? 'Не удалось получить анонимную сессию.'}
-            onRetry={() => void retry()}
-            retrying={retrying}
-          />
-        ) : (
-          <>
-            {session ? <IdentityCard session={session} /> : <IdentityCardSkeleton />}
-
-            {inChat && chat ? (
-              <ChatPanel
-                chat={chat}
-                onReport={() => setReporting(true)}
-                onBlock={() => setBlocking(true)}
+        {protocolMismatch ? (
+          <Card className="border-destructive/50">
+            <CardContent className="flex items-start gap-3 pt-4 sm:pt-5">
+              <TriangleAlert
+                className="mt-0.5 size-4 shrink-0 text-destructive"
+                aria-hidden="true"
               />
-            ) : phase === 'searching' ? (
-              <SearchPanel />
-            ) : (
-              <div className="flex flex-col gap-4">
-                <div
-                  className="flex flex-wrap gap-1 rounded-card border border-border bg-muted/50 p-1"
-                  role="tablist"
-                  aria-label="Разделы"
-                >
-                  {TABS.map(({ id, label, icon: Icon }) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="tab"
-                      id={`tab-${id}`}
-                      aria-selected={tab === id}
-                      aria-controls={`panel-${id}`}
-                      onClick={() => setTab(id)}
-                      className={cn(
-                        'flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                        tab === id
-                          ? 'bg-card shadow-sm'
-                          : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <Icon className="size-4" aria-hidden="true" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
+              <p className="text-sm" role="alert">
+                Сервер работает по другой версии протокола. Обновите страницу — иначе сообщения
+                могут теряться.
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
 
-                <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`}>
-                  {tab === 'search' ? (
-                    <SearchPanel onOpenSettings={() => setTab('settings')} />
-                  ) : null}
-                  {tab === 'direct' ? <DirectPanel /> : null}
-                  {tab === 'settings' && session ? <PreferencesPanel session={session} /> : null}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </main>
+        <main id="main" className="flex min-h-0 flex-1 flex-col gap-3">
+          {!reachable && !session ? (
+            <UnavailableState
+              title={connection === 'rejected' ? 'Доступ закрыт' : 'Нет связи с сервером'}
+              detail={connectionDetail ?? bootError ?? 'Не удалось получить анонимную сессию.'}
+              onRetry={() => void retry()}
+              retrying={retrying}
+            />
+          ) : (
+            <>
+              {/*
+                Only while idle: joining a chat is impossible while another one is running
+                (the server refuses it), and while a search is in progress the field would
+                be a control that cannot be used.
+              */}
+              {phase === 'idle' ? <DirectSearch /> : null}
+
+              {inChat && chat ? (
+                <ChatPanel
+                  chat={chat}
+                  // The block action is a choice the user makes in their settings: with it
+                  // switched off, the button is not offered at all (docs/DECISIONS.md D24).
+                  canBlock={session?.blockingEnabled ?? true}
+                  onReport={() => setReporting(true)}
+                  onBlock={() => setBlocking(true)}
+                />
+              ) : (
+                <SearchPanel session={session} />
+              )}
+            </>
+          )}
+        </main>
+      </div>
+
+      <AdRail side="right" />
 
       <IncomingRequestDialog />
       <ReportDialog open={reporting} onClose={() => setReporting(false)} />
       <BlockDialog open={blocking} onClose={() => setBlocking(false)} />
       <Toaster />
     </div>
+  );
+}
+
+/** One reserved advertising column. Empty by construction; see `AdSlot`. */
+function AdRail({ side }: { side: 'left' | 'right' }) {
+  return (
+    <aside aria-hidden="true" className="hidden w-[170px] shrink-0 xl:block" data-ad-rail={side}>
+      <AdSlot variant="rail" />
+    </aside>
   );
 }
 
@@ -207,17 +193,11 @@ function UnavailableState({
   );
 }
 
-function IdentityCardSkeleton() {
+function IdentitySkeleton() {
   return (
-    <Card aria-busy="true" aria-label="Получаем ваш User ID">
-      <CardHeader className="pb-3">
-        <Skeleton className="h-5 w-32" />
-        <Skeleton className="mt-2 h-4 w-full max-w-md" />
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <Skeleton className="h-10 w-56" />
-        <Skeleton className="h-3 w-32" />
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-1" aria-busy="true" aria-label="Получаем ваш User ID">
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-7 w-44" />
+    </div>
   );
 }

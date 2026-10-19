@@ -341,3 +341,96 @@ per-user consent prompts (the owner explicitly asked that users not be told); a 
 and password (an account, a reset flow and a second identity model for a product that has none — a key
 is enough for one operator); encrypting the archive with a key held by the same process (a false sense
 of protection: the process must decrypt it to serve the owner).
+
+## D22. One page, ages instead of years, typed dropdowns and two themes
+
+**Context.** The first interface split the product into three tabs — random search, direct contact by
+User ID, settings — with a large identity card at the top. The owner judged it wrong on his own screen
+and described the replacement: everything on one page, a compact header with the User ID right next to
+the product name, the "ID of the person you want to talk to" field directly underneath, the filters
+behind a "Настройки" button below the main action, the "about you" and "whom to look for" halves side
+by side, cities/regions/languages as dropdowns that still accept typing, an **age** rather than a year
+of birth, and a dark/light switch.
+
+**Decision.** The screen is one page (`home-screen.tsx`) whose composition is a pure function of the
+store's `phase`; there are no tabs at all. Concretely:
+- the header carries the product name, the User ID (clicking the ID copies it) and the connection
+  badge, plus the theme switch;
+- `DirectSearch` (the field, then the lookup, then "Отправить заявку") is rendered only while idle,
+  because joining a chat is impossible while another one runs and a control that cannot be used is
+  worse than an absent one;
+- the filters are a disclosure under "Найти собеседника" (`aria-expanded`), and the collapsed state
+  still *states* what is applied, so an invisible filter cannot be blamed on the search;
+- **the field is an age, the column is a birth year.** `birthYearFromAge`/`ageFromBirthYear` convert in
+  the settings component only, so a stored value cannot go stale and the matching engine keeps working
+  on `prefAgeMin`/`prefAgeMax` unchanged;
+- city and region are free text with a suggestion list (`data/places.ts`, opened by typing, never
+  forced); languages stay a closed vocabulary because a language is compared for equality between two
+  people and "русский"/"ru" must be one value;
+- the gender vocabulary lost "другое": a value that no filter can express and that only ever produced
+  "matches nobody" was a trap, and the DB enum was left untouched (additive migrations only) with the
+  read paths dropping it;
+- the theme is a `class` on `<html>` (`dark`), chosen once in `localStorage` (`anonlink.theme`), applied
+  by an inline script before the first paint so there is no flash, and switched from the header. When
+  the user has never chosen, the system preference decides and a later system change is followed —
+  after an explicit choice it is not.
+
+**Consequences.** Every message is drawn on its own opaque bubble, with timestamp and delivery state
+inside it, and the chat header and composer are opaque bars: this is what keeps a background creative
+from ever sitting behind a word the user has to read (see D23). The old components
+(`identity-card`, `direct-panel`, `preferences-panel`, `search-preferences-panel`) are deleted rather
+than left unused. The end-to-end suite had to change with the interface: the helpers now open the
+settings disclosure instead of switching a tab, and "the summary states the filters" is asserted with
+the disclosure *closed*, because the settings' own "будет применяться" preview says the same thing.
+
+**Rejected.** Keeping the tabs and restyling them (the owner's complaint was precisely that the two
+things a user can do were hidden behind a mode switch); a client-side age field stored as an age
+(it would drift as the years pass, and the filter arithmetic is defined on a birth year); a mandatory
+dropdown for the city (a list of cities is never complete, and being unable to answer would block the
+save); auto-detecting the theme on every load without remembering the choice.
+
+## D23. Advertising is a reserved seam, not a feature
+
+**Context.** The owner wants the empty space beside the chat and, eventually, behind it to be usable
+for advertising, and asked for the layout to be *technically ready* for that. Nothing about
+advertising is decided: there is no provider, no creative, no money.
+
+**Decision.** Two container types exist as real, sized elements — `AdSlot variant="rail"` in the
+columns flanking the page (only on wide screens) and `AdSlot variant="chat-background"` as a layer
+inside the conversation card. Both paint nothing while they are empty, and both are `aria-hidden`.
+The chat card is `isolate relative` so the background layer paints *behind* the conversation rather
+than over it.
+
+**Consequences.** Filling a slot later is a change of content, not a change of layout, which is the
+whole point. Readability is guaranteed by the messages themselves (opaque bubbles, opaque header and
+composer), not by keeping the layer empty — so a creative cannot make a message unreadable even by
+accident. What is *not* decided: any third-party script. Loading a tracker into a page whose promise is
+anonymity is a privacy change, and it belongs in `docs/SECURITY.md` and a new decision before the first
+network request is made — the comment in `ad-slot.tsx` says so where the code lives.
+
+**Rejected.** Reserving the space with visible empty boxes (an empty bordered box reads as a broken
+image); building an ad server now; putting a slot anywhere a message is drawn.
+
+## D24. Blocking is an optional feature, and switching it off is not an amnesty
+
+**Context.** The owner asked for the block function to be optional: with it switched on, the chat
+button and the blocked list exist; with it off, neither the button nor the list should be needed. He
+also asked for the feature to be switchable by the user.
+
+**Decision.** `Identity.blockingEnabled` (default `true`, additive migration) carries the choice.
+Switching it off hides the "Блокировать" action in a chat and the "Заблокированные" section in the
+settings, and — because the server is the authority — `ChatService.assertBlockingAllowed` refuses a
+*new* block with `ErrorCode.BLOCKING_DISABLED` (409). The check is deliberately absent from the unblock
+path: wanting the button gone must never trap a user with a block they cannot remove, and it is not
+applied to the list either, so the state stays visible and undoable. Turning the feature back on
+restores both the button and the list, and the blocks made before are still there.
+
+**Consequences.** `settingsUpdateSchema` gained a boolean, which is where a plain truthiness check would
+have been a bug: `blockingEnabled: false` is a value the user asked for, not "absent", so both the
+controller and the service test it with `!== undefined` (there is an integration test for exactly that).
+The interface hides controls; the API enforces the rule; a tab left open before the setting changed
+still gets the refusal rather than succeeding.
+
+**Rejected.** Removing the block feature entirely (the owner wants it available, just optional);
+deleting existing blocks when the feature is switched off (it would silently unblock people the user
+had deliberately blocked); an interface-only rule.

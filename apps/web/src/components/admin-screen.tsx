@@ -61,7 +61,6 @@ import { apiRequest } from '@/lib/http';
 const GENDER_LABELS: Record<Gender, string> = {
   female: 'Женщина',
   male: 'Мужчина',
-  other: 'Другое',
 };
 
 const LANGUAGE_LABELS: Record<Language, string> = {

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 
+import { AdSlot } from '@/components/ad-slot';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -30,6 +31,14 @@ import { useAppStore, type ChatInfo, type UiMessage } from '@/store/app-store';
 
 export interface ChatPanelProps {
   chat: ChatInfo;
+  /**
+   * Whether the user has the block feature switched on.
+   *
+   * With it off, the action is not offered at all — the same setting also hides the
+   * blocked list in the settings (docs/DECISIONS.md D24). The server refuses the call
+   * either way, so this is the interface agreeing with the rule, not enforcing it.
+   */
+  canBlock: boolean;
   /** Opens the report dialog, which is owned by the screen above. */
   onReport: () => void;
   /** Opens the block confirmation, also owned by the screen above. */
@@ -42,7 +51,7 @@ export interface ChatPanelProps {
  * The transcript stays visible after the chat ends — the user should be able to read
  * what was said, and the reason it ended, rather than watching the screen clear.
  */
-export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
+export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps) {
   const messages = useAppStore((state) => state.messages);
   const peerAway = useAppStore((state) => state.peerAway);
   const ended = useAppStore((state) => state.endedChat);
@@ -99,14 +108,25 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
 
   return (
     <Card
-      className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      // `isolate` + `relative` make the card its own stacking context, which is what lets
+      // the advertising layer above paint *behind* the conversation instead of over it.
+      className="relative isolate flex min-h-0 flex-1 flex-col overflow-hidden"
       // The chat id is not a secret (only the two participants ever see it, and it names
       // an ephemeral conversation), and it is the one stable handle the end-to-end suite
       // needs to prove a third party cannot write into someone else's chat.
       data-chat-id={chat.chatId}
     >
+      {/*
+        Reserved advertising layer behind the conversation (docs/DECISIONS.md D23). Empty
+        today and painting nothing. Readability does not depend on it staying empty: every
+        message — including system notices — is drawn on its own opaque bubble, and the
+        header and composer are opaque bars, so a creative can only ever show in the gaps
+        between bubbles.
+      */}
+      <AdSlot variant="chat-background" className="-z-10" />
+
       {/* --- header --------------------------------------------------------- */}
-      <CardHeader className="flex-row items-center justify-between gap-3 border-b border-border bg-muted/40 py-3">
+      <CardHeader className="flex-row items-center justify-between gap-3 border-b border-border bg-muted py-3">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="flex items-center gap-2 text-sm font-semibold">
@@ -133,10 +153,12 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
 
         {!ended ? (
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" disabled={busy} onClick={onBlock}>
-              <Ban className="size-4" aria-hidden="true" />
-              <span className="sr-only sm:not-sr-only">Блокировать</span>
-            </Button>
+            {canBlock ? (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={onBlock}>
+                <Ban className="size-4" aria-hidden="true" />
+                <span className="sr-only sm:not-sr-only">Блокировать</span>
+              </Button>
+            ) : null}
             <Button variant="ghost" size="sm" disabled={busy} onClick={onReport}>
               <Flag className="size-4" aria-hidden="true" />
               <span className="sr-only sm:not-sr-only">Жалоба</span>
@@ -171,7 +193,7 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
         aria-label="Переписка"
       >
         {messages.length === 0 && !ended ? (
-          <p className="flex flex-1 items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+          <p className="mx-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-center text-sm text-muted-foreground">
             <MessageSquare className="size-4" aria-hidden="true" />
             Напишите первое сообщение.
           </p>
@@ -186,7 +208,7 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
 
       {/* --- composer or end state ------------------------------------------ */}
       {ended ? (
-        <div className="flex flex-col gap-3 border-t border-border bg-muted/40 p-4">
+        <div className="flex flex-col gap-3 border-t border-border bg-muted p-4">
           <p className="flex items-center gap-2 text-sm">
             <CircleAlert className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             {describeChatEnd(ended.reason)}
@@ -218,7 +240,7 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-2 border-t border-border p-3">
+        <div className="flex flex-col gap-2 border-t border-border bg-card p-3">
           <label className="sr-only" htmlFor="chat-composer">
             Сообщение
           </label>
@@ -269,7 +291,7 @@ export function ChatPanel({ chat, onReport, onBlock }: ChatPanelProps) {
 function MessageBubble({ message }: { message: UiMessage }) {
   if (message.from === 'system') {
     return (
-      <p className="flex items-center justify-center gap-2 text-center text-xs text-muted-foreground">
+      <p className="mx-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-center text-xs text-muted-foreground">
         <CircleAlert className="size-3.5 shrink-0" aria-hidden="true" />
         {message.text}
       </p>
@@ -277,35 +299,47 @@ function MessageBubble({ message }: { message: UiMessage }) {
   }
 
   const mine = message.from === 'you';
+  const failed = message.status === 'failed';
 
+  /*
+    Everything about a message lives inside its bubble, including the timestamp and the
+    delivery state — the Telegram shape the owner asked for. It is not only a matter of
+    taste: the bubble is the opaque surface that keeps a message readable, and a
+    timestamp drawn on the background next to it would be the first thing an advertising
+    creative behind the conversation made illegible.
+  */
   return (
-    <div className={cn('flex flex-col gap-1', mine ? 'items-end' : 'items-start')}>
+    <div className={cn('flex flex-col', mine ? 'items-end' : 'items-start')}>
       <div
         className={cn(
-          'max-w-[85%] rounded-2xl px-3.5 py-2 text-sm break-words whitespace-pre-wrap',
+          'max-w-[85%] rounded-2xl px-3.5 py-2 text-sm',
           mine ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground',
-          message.status === 'failed' && 'bg-destructive text-destructive-foreground',
+          failed && 'bg-destructive text-destructive-foreground',
         )}
       >
-        {message.text}
-      </div>
+        <span className="break-words whitespace-pre-wrap">{message.text}</span>
 
-      <span className="flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
-        {formatTime(message.sentAt)}
-        {message.status === 'sending' ? (
-          <>
-            <LoaderCircle className="size-3 animate-spin" aria-hidden="true" /> отправляется
-          </>
-        ) : null}
-        {message.status === 'failed' ? (
-          <>
-            <TriangleAlert className="size-3 text-destructive" aria-hidden="true" />
-            <span className="text-destructive">
+        <span
+          className={cn(
+            'mt-0.5 flex items-center justify-end gap-1 text-[11px]',
+            mine && !failed ? 'text-primary-foreground/70' : 'text-muted-foreground',
+          )}
+        >
+          {formatTime(message.sentAt)}
+          {message.status === 'sending' ? (
+            <>
+              <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
+              отправляется
+            </>
+          ) : null}
+          {failed ? (
+            <>
+              <TriangleAlert className="size-3" aria-hidden="true" />
               не отправлено{message.failureReason ? `: ${message.failureReason}` : ''}
-            </span>
-          </>
-        ) : null}
-      </span>
+            </>
+          ) : null}
+        </span>
+      </div>
     </div>
   );
 }

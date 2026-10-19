@@ -2,12 +2,13 @@ import { expect, test } from '@playwright/test';
 
 import {
   chatCard,
+  closeSettings,
   connectionStatus,
   expectMessage,
   expectNoClientErrors,
   lookupUser,
   newIdentity,
-  openSettingsTab,
+  openSettings,
   sendMessage,
   waitForChat,
 } from '../support/app';
@@ -81,10 +82,11 @@ test.describe('direct contact by User ID', () => {
     const alice = await newIdentity(browser);
     const bob = await newIdentity(browser);
 
-    await openSettingsTab(bob.page);
+    await openSettings(bob.page);
     const nobodyOption = bob.page.getByRole('button', { name: /Не принимать заявки/ });
     await nobodyOption.click();
     await expect(nobodyOption).toHaveAttribute('aria-pressed', 'true');
+    await closeSettings(bob.page);
 
     // Alice can still find the identity — it exists — but cannot ask for a chat.
     await lookupUser(alice.page, bob.publicId);
@@ -99,7 +101,7 @@ test.describe('direct contact by User ID', () => {
     // value that only ever lived in this tab.
     await bob.page.reload();
     await expect(connectionStatus(bob.page)).toHaveText('На связи');
-    await openSettingsTab(bob.page);
+    await openSettings(bob.page);
     await expect(bob.page.getByRole('button', { name: /Не принимать заявки/ })).toHaveAttribute(
       'aria-pressed',
       'true',

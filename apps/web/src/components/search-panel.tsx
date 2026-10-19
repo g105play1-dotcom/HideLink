@@ -1,38 +1,46 @@
 'use client';
 
-import { LoaderCircle, Search, SlidersHorizontal, Users } from 'lucide-react';
+import { LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useState } from 'react';
 
+import { SettingsPanel, SettingsSkeleton } from '@/components/settings-panel';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { client } from '@/lib/anonymous-client';
 import { formatElapsed, formatRemaining } from '@/lib/format';
 import { CRITERION_LABELS, describeCriteria } from '@/lib/labels';
 import { useTicker } from '@/lib/use-ticker';
-import { useAppStore } from '@/store/app-store';
+import { useAppStore, type SessionInfo } from '@/store/app-store';
 
 /**
- * Random matching.
+ * Random matching, and the settings that shape it — one page, no tabs.
  *
- * Two states, both real: a call to action when idle, and a live waiting screen while
- * queued. The waiting screen shows an elapsed timer because "how long have I been
- * waiting" is the one thing a user wants to know, and it proves the request is still
- * alive rather than silently dropped.
+ * ## Why the settings are a disclosure under the button
  *
- * Both states also state *which filters are being applied*, and they read them from
- * different places on purpose: while idle, from the saved settings (what a search would
- * use); while waiting, from the server (what is actually being used, including anything it
- * has already dropped). Showing the form's values while waiting would be a lie the moment
- * the server widened the search.
+ * The owner asked for exactly that (docs/DECISIONS.md D22). It also happens to be the
+ * right shape: the call to action is the one thing a returning user wants, the filters
+ * are something you set once and then rarely revisit, and a filter you cannot see is a
+ * filter you will blame the search for. So the collapsed state still *states* what is
+ * applied and offers one button to change it.
+ *
+ * ## Two states, two sources for the filters
+ *
+ * The waiting screen reports the criteria the *server* says it is applying, not the ones
+ * the form holds: the moment the server widens the search the form is out of date, and
+ * telling the user the wrong criteria would be worse than telling them nothing. The
+ * elapsed timer is there because "how long have I been waiting" is the one thing a waiting
+ * user wants to know, and it proves the request is still alive.
  */
-export function SearchPanel({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export function SearchPanel({ session }: { session: SessionInfo | null }) {
   const phase = useAppStore((state) => state.phase);
   const searchingSince = useAppStore((state) => state.searchingSince);
   const searchCriteria = useAppStore((state) => state.searchCriteria);
   const relaxAfterMs = useAppStore((state) => state.relaxAfterMs);
   const relaxedCriteria = useAppStore((state) => state.relaxedCriteria);
   const savedSearch = useAppStore((state) => state.session?.search ?? null);
+
   const [pending, setPending] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const searching = phase === 'searching';
   // Ticks only while the waiting screen is visible.
@@ -61,28 +69,22 @@ export function SearchPanel({ onOpenSettings }: { onOpenSettings?: () => void })
 
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
-            Ищем собеседника…
-          </CardTitle>
-          <CardDescription>
-            Как только кто-то освободится, чат откроется автоматически. Можно не ждать здесь — поиск
-            продолжится.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="font-mono text-2xl tabular-nums" aria-label="Время ожидания">
+        <CardContent className="flex flex-col gap-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
+              Ищем собеседника…
+            </span>
+            <span className="font-mono text-xl tabular-nums" aria-label="Время ожидания">
               {searchingSince ? formatElapsed(searchingSince, now) : '00:00'}
             </span>
-            <Button variant="outline" onClick={() => void cancel()} disabled={pending}>
+            <Button variant="outline" size="sm" onClick={() => void cancel()} disabled={pending}>
               Отменить поиск
             </Button>
           </div>
 
           <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <p className="text-xs font-medium text-muted-foreground">Ищем по фильтрам</p>
+            <p className="section-label">Ищем по фильтрам</p>
 
             {active.length === 0 ? (
               <p className="text-sm">Без фильтров — подойдёт любой собеседник.</p>
@@ -110,7 +112,7 @@ export function SearchPanel({ onOpenSettings }: { onOpenSettings?: () => void })
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Фильтры можно изменить в «Настройках» после отмены поиска.
+            Можно не ждать здесь — поиск продолжится, а чат откроется автоматически.
           </p>
         </CardContent>
       </Card>
@@ -120,68 +122,52 @@ export function SearchPanel({ onOpenSettings }: { onOpenSettings?: () => void })
   const saved = savedSearch ? describeCriteria(savedSearch) : [];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="size-4 text-primary" aria-hidden="true" />
-          Случайный собеседник
-        </CardTitle>
-        <CardDescription>
-          Анонимный чат один на один. Ни вы, ни собеседник не видите User ID друг друга — только
-          вымышленное имя на время разговора.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <Button
-          size="lg"
-          onClick={() => void start()}
-          disabled={pending}
-          className="w-full sm:w-auto"
-        >
-          {pending ? (
-            <>
-              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-              Начинаем…
-            </>
-          ) : (
-            <>
-              <Search className="size-4" aria-hidden="true" />
-              Найти собеседника
-            </>
-          )}
-        </Button>
+    <div className="flex flex-col gap-3">
+      <Card>
+        <CardContent className="flex flex-col gap-3 p-4">
+          <Button size="lg" onClick={() => void start()} disabled={pending} className="w-full">
+            {pending ? (
+              <>
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                Начинаем…
+              </>
+            ) : (
+              <>
+                <Search className="size-4" aria-hidden="true" />
+                Найти собеседника
+              </>
+            )}
+          </Button>
 
-        {savedSearch ? (
-          <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                <SlidersHorizontal className="size-3.5" aria-hidden="true" />
-                Фильтры поиска
-              </p>
-              {onOpenSettings ? (
-                <Button variant="ghost" size="sm" onClick={onOpenSettings}>
-                  Изменить
-                </Button>
-              ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
+            <div className="flex min-w-0 flex-col">
+              <span className="section-label">Фильтры поиска</span>
+              <span className="truncate text-sm">
+                {saved.length === 0
+                  ? 'Без фильтров — подойдёт любой собеседник.'
+                  : saved.join(' · ')}
+              </span>
             </div>
 
-            {saved.length === 0 ? (
-              <p className="text-sm">Без фильтров — подойдёт любой собеседник.</p>
-            ) : (
-              <ul className="flex flex-col gap-0.5 text-sm">
-                {saved.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingsOpen((open) => !open)}
+              aria-expanded={settingsOpen}
+              aria-controls="settings-panel"
+            >
+              <Settings2 className="size-4" aria-hidden="true" />
+              Настройки
+            </Button>
           </div>
-        ) : null}
+        </CardContent>
+      </Card>
 
-        <ul className="flex flex-col gap-1.5 text-xs text-muted-foreground">
-          <li>• Можно завершить чат в любой момент или сразу перейти к следующему.</li>
-          <li>• Собеседника можно заблокировать или отправить на него жалобу.</li>
-        </ul>
-      </CardContent>
-    </Card>
+      {settingsOpen ? (
+        <div id="settings-panel">
+          {session ? <SettingsPanel session={session} /> : <SettingsSkeleton />}
+        </div>
+      ) : null}
+    </div>
   );
 }

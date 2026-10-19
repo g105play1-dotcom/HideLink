@@ -72,11 +72,11 @@ test.describe('random matching', () => {
     // The transcript survives, so the user can still read what was said.
     await expectMessage(alice.page, 'до встречи');
 
-    // "Готово" dismisses the finished conversation and brings the tabs back. Without it
-    // the ended screen was a dead end whose only exit was another random search.
+    // "Готово" dismisses the finished conversation and brings the start screen back.
+    // Without it the ended screen was a dead end whose only exit was another search.
     await alice.page.getByRole('button', { name: 'Готово', exact: true }).click();
     await expect(searchButton(alice.page)).toBeVisible();
-    await expect(alice.page.getByRole('tab', { name: 'По User ID', exact: true })).toBeVisible();
+    await expect(alice.page.locator('#target-user-id')).toBeVisible();
     await expect(chatCard(alice.page)).toHaveCount(0);
 
     expectNoClientErrors(alice);

@@ -3,9 +3,10 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   cancelSearchButton,
   chatCard,
+  closeSettings,
   expectNoClientErrors,
   newIdentity,
-  openSettingsTab,
+  openSettings,
   startRandomSearch,
   waitForChat,
 } from '../support/app';
@@ -46,10 +47,6 @@ async function saveFilters(page: Page): Promise<void> {
   await expect(page.getByText('Фильтры поиска сохранены.')).toBeVisible();
 }
 
-async function openRandomTab(page: Page): Promise<void> {
-  await page.getByRole('tab', { name: 'Случайный чат', exact: true }).click();
-}
-
 test.describe('filtered search', () => {
   test('a long search widens visibly, and then meets the peer it had just excluded', async ({
     browser,
@@ -58,7 +55,7 @@ test.describe('filtered search', () => {
     const bob = await newIdentity(browser);
 
     // Alice says she is a woman and wants to meet women.
-    await openSettingsTab(alice.page);
+    await openSettings(alice.page);
     await declareGender(alice.page, 'Женский');
     await saveProfile(alice.page);
     await togglePartnerGender(alice.page, 'Женский');
@@ -75,8 +72,10 @@ test.describe('filtered search', () => {
     await expect(alice.page.getByText('Разрешено', { exact: true })).toBeVisible();
     await saveFilters(alice.page);
 
-    // The idle search screen states what a search would apply.
-    await openRandomTab(alice.page);
+    // The idle search screen states what a search would apply. The settings have to be
+    // closed for that: their "будет применяться" preview says the same thing, and two
+    // elements with the same text would be ambiguous — to the test and to a reader.
+    await closeSettings(alice.page);
     await expect(alice.page.getByText('Пол: Женский')).toBeVisible();
 
     await startRandomSearch(alice.page);
@@ -93,10 +92,10 @@ test.describe('filtered search', () => {
 
     // Bob is a man: exactly the peer the filter excluded a moment ago. Alice now accepts
     // anyone, so the two must meet.
-    await openSettingsTab(bob.page);
+    await openSettings(bob.page);
     await declareGender(bob.page, 'Мужской');
     await saveProfile(bob.page);
-    await openRandomTab(bob.page);
+    await closeSettings(bob.page);
 
     await startRandomSearch(bob.page);
 
@@ -113,15 +112,15 @@ test.describe('filtered search', () => {
     const bob = await newIdentity(browser);
 
     // Alice wants to meet men; Bob is a woman. Widening is left at its default (off).
-    await openSettingsTab(alice.page);
+    await openSettings(alice.page);
     await togglePartnerGender(alice.page, 'Мужской');
     await saveFilters(alice.page);
-    await openRandomTab(alice.page);
+    await closeSettings(alice.page);
 
-    await openSettingsTab(bob.page);
+    await openSettings(bob.page);
     await declareGender(bob.page, 'Женский');
     await saveProfile(bob.page);
-    await openRandomTab(bob.page);
+    await closeSettings(bob.page);
 
     await startRandomSearch(alice.page);
     await startRandomSearch(bob.page);
@@ -135,10 +134,10 @@ test.describe('filtered search', () => {
 
     // Alice changes her mind, removes the filter, and searches again — Bob is still waiting.
     await cancelSearchButton(alice.page).click();
-    await openSettingsTab(alice.page);
+    await openSettings(alice.page);
     await togglePartnerGender(alice.page, 'Мужской');
     await saveFilters(alice.page);
-    await openRandomTab(alice.page);
+    await closeSettings(alice.page);
     await startRandomSearch(alice.page);
 
     const aliceChatId = await waitForChat(alice.page);
@@ -153,7 +152,7 @@ test.describe('filtered search', () => {
     browser,
   }) => {
     const alice = await newIdentity(browser);
-    await openSettingsTab(alice.page);
+    await openSettings(alice.page);
 
     const saveButton = alice.page.getByRole('button', { name: 'Сохранить фильтры', exact: true });
     await expect(saveButton).toBeEnabled();

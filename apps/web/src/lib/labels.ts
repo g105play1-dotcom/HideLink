@@ -20,7 +20,6 @@ import {
 export const GENDER_LABELS: Record<Gender, string> = {
   female: 'Женский',
   male: 'Мужской',
-  other: 'Другое',
 };
 
 export const LANGUAGE_LABELS: Record<Language, string> = {
