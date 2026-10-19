@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { OWNER_CONTACT_MAX_LENGTH, OWNER_MESSAGE_TOPICS } from './limits.js';
 import {
   blockSchema,
   chatMessageSchema,
   connectRequestSchema,
   connectRespondSchema,
   messageTextSchema,
+  ownerMessageSchema,
   publicIdSchema,
   reportSchema,
   settingsSchema,
@@ -70,6 +72,40 @@ describe('connectRequestSchema', () => {
 
   it('rejects an over-long note', () => {
     expect(connectRequestSchema.safeParse({ publicId, note: 'x'.repeat(201) }).success).toBe(false);
+  });
+});
+
+describe('ownerMessageSchema', () => {
+  it('accepts every declared topic, with or without a contact line', () => {
+    for (const topic of OWNER_MESSAGE_TOPICS) {
+      expect(ownerMessageSchema.parse({ topic, text: 'привет' })).toEqual({
+        topic,
+        text: 'привет',
+      });
+    }
+
+    expect(
+      ownerMessageSchema.parse({ topic: 'suggestion', text: 'идея', contact: 'tg: @me' }),
+    ).toEqual({ topic: 'suggestion', text: 'идея', contact: 'tg: @me' });
+  });
+
+  it('rejects an unknown topic, blank text and an over-long contact line', () => {
+    expect(ownerMessageSchema.safeParse({ topic: 'refund', text: 'привет' }).success).toBe(false);
+    expect(ownerMessageSchema.safeParse({ topic: 'other', text: '   ' }).success).toBe(false);
+    expect(
+      ownerMessageSchema.safeParse({
+        topic: 'other',
+        text: 'привет',
+        contact: 'x'.repeat(OWNER_CONTACT_MAX_LENGTH + 1),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects unknown properties, so a sender cannot be smuggled in through the body', () => {
+    expect(
+      ownerMessageSchema.safeParse({ topic: 'other', text: 'привет', publicId: 'AL7KM39PQ2XRZ4' })
+        .success,
+    ).toBe(false);
   });
 });
 

@@ -14,6 +14,7 @@ import { IdentityModule } from './identity/identity.module.js';
 import { RequestGuard } from './identity/request.guard.js';
 import { MaintenanceModule } from './maintenance/maintenance.module.js';
 import { ModerationModule } from './moderation/moderation.module.js';
+import { OwnerModule } from './owner/owner.module.js';
 import { PresenceModule } from './presence/presence.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
@@ -44,6 +45,7 @@ import { RealtimeModule } from './realtime/realtime.module.js';
     IdentityModule,
     ModerationModule,
     ArchiveModule,
+    OwnerModule,
     ChatModule,
     RealtimeModule,
     HealthModule,

@@ -4,6 +4,7 @@ import {
   type Gender,
   type Language,
   type LocationMode,
+  type OwnerMessageTopic,
   type RelaxableCriterion,
   type SearchPreferences,
 } from '@anonlink/shared';
@@ -52,6 +53,22 @@ export const CRITERION_LABELS: Record<RelaxableCriterion, string> = {
   location: 'город или регион',
   age: 'возраст',
   genders: 'пол',
+};
+
+/**
+ * The subsections of the "contact the owner" form, as the user reads them.
+ *
+ * Exhaustive on purpose: the shared list is the single source of the vocabulary, so a new
+ * topic is a compile error here until it has a name for the screen — and the owner's inbox
+ * renders messages with the same labels.
+ */
+export const OWNER_TOPIC_LABELS: Record<OwnerMessageTopic, string> = {
+  abuse: 'Жалоба',
+  suggestion: 'Предложение',
+  bug: 'Ошибка в работе',
+  advertising: 'Реклама',
+  partnership: 'Сотрудничество',
+  other: 'Другое',
 };
 
 function joinRussian(items: string[]): string {

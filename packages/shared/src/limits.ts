@@ -54,3 +54,31 @@ export const CHAT_END_REASONS: readonly ChatEndReason[] = [
   'server_shutdown',
   'expired',
 ];
+
+/**
+ * The subsections of the "contact the owner" form.
+ *
+ * A fixed vocabulary, validated on every write, so the owner's inbox can be grouped and
+ * filtered instead of arriving as an undifferentiated pile. `other` is the escape hatch
+ * and the free text carries the detail. See docs/DECISIONS.md D26.
+ */
+export const OWNER_MESSAGE_TOPICS = [
+  'abuse',
+  'suggestion',
+  'bug',
+  'advertising',
+  'partnership',
+  'other',
+] as const;
+export type OwnerMessageTopic = (typeof OWNER_MESSAGE_TOPICS)[number];
+
+/** Maximum length of the free text a user may send the owner. */
+export const OWNER_MESSAGE_MAX_LENGTH = 2000;
+
+/**
+ * Maximum length of the optional "how can we reach you" line.
+ *
+ * Deliberately free text rather than a validated e-mail/phone: the form must not become a
+ * quiet sign-up field, and the owner can answer whatever the user chose to leave.
+ */
+export const OWNER_CONTACT_MAX_LENGTH = 200;

@@ -5,6 +5,7 @@ import { log } from '../common/logger.js';
 import { RateLimitService } from '../common/rate-limit.service.js';
 import { ArchiveService } from '../archive/archive.service.js';
 import { ChatService } from '../chat/chat.service.js';
+import { OwnerMessageService } from '../owner/owner.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -30,6 +31,8 @@ export interface MaintenanceReport {
   deletedArchives: number;
   /** Messages removed together with those archived conversations. */
   deletedArchivedMessages: number;
+  /** "Contact the owner" messages deleted because their retention deadline passed. */
+  deletedOwnerMessages: number;
 }
 
 /**
@@ -46,7 +49,8 @@ export interface MaintenanceReport {
  *  - security events after `SECURITY_EVENT_RETENTION_DAYS`;
  *  - sessions after `SESSION_RETENTION_DAYS` past becoming invalid;
  *  - archived conversations after the owner's own retention (`retentionDays`), when the
- *    owner has switched archiving on at all.
+ *    owner has switched archiving on at all;
+ *  - "contact the owner" messages after `OWNER_MESSAGE_RETENTION_DAYS`.
  *
  * Identity rows are deliberately never deleted here: they hold a random public ID
  * and timestamps and no personal data, and deleting one would cascade away the
@@ -60,6 +64,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
     private readonly prisma: PrismaService,
     private readonly chat: ChatService,
     private readonly archive: ArchiveService,
+    private readonly ownerMessages: OwnerMessageService,
     private readonly rateLimit: RateLimitService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -106,6 +111,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       deletedSessions: 0,
       deletedArchives: 0,
       deletedArchivedMessages: 0,
+      deletedOwnerMessages: 0,
     };
 
     try {
@@ -143,12 +149,13 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       | 'deletedSessions'
       | 'deletedArchives'
       | 'deletedArchivedMessages'
+      | 'deletedOwnerMessages'
     >
   > {
     const at = new Date(now);
     const sessionCutoff = new Date(now - this.config.SESSION_RETENTION_DAYS * DAY_MS);
 
-    const [reports, securityEvents, sessions, archives] = await Promise.all([
+    const [reports, securityEvents, sessions, archives, expiredOwnerMessages] = await Promise.all([
       this.prisma.report.deleteMany({ where: { expiresAt: { lt: at } } }),
       this.prisma.securityEvent.deleteMany({ where: { expiresAt: { lt: at } } }),
       this.prisma.session.deleteMany({
@@ -160,6 +167,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       // owner sets it, `0` means "keep until I delete it", and `deleteExpired` is the one
       // query that both this sweep and the owner's "delete expired now" button call.
       this.archive.deleteExpired(now),
+      this.ownerMessages.deleteExpired(now),
     ]);
 
     return {
@@ -168,6 +176,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       deletedSessions: sessions.count,
       deletedArchives: archives.deletedArchives,
       deletedArchivedMessages: archives.deletedMessages,
+      deletedOwnerMessages: expiredOwnerMessages,
     };
   }
 }

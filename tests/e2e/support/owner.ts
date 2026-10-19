@@ -102,3 +102,25 @@ export async function resetArchive(): Promise<void> {
     body: JSON.stringify({ confirm: true }),
   });
 }
+
+/**
+ * Empties the owner's inbox ("Сообщения от пользователей").
+ *
+ * Teardown only, for the same reason `resetArchive` exists: the inbox is global state, and
+ * the integration suite's `persistence.test.ts` runs against the same database. A spec that
+ * fails halfway must still leave it clean.
+ */
+export async function resetInbox(): Promise<void> {
+  const response = await fetch(`${E2E_API_BASE}/admin/messages`, {
+    headers: { authorization: `Bearer ${E2E_ADMIN_TOKEN}` },
+  });
+
+  if (!response.ok) {
+    throw new Error(`[e2e] owner API /admin/messages answered ${response.status}`);
+  }
+
+  const body = (await response.json()) as { messages: Array<{ id: string }> };
+  for (const message of body.messages) {
+    await ownerApi(`/admin/messages/${message.id}`, { method: 'DELETE' });
+  }
+}

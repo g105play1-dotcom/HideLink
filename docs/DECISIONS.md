@@ -474,3 +474,41 @@ multi-select that stored just one mode (it would show the user two answers and a
 the neutral state implicit (the owner read an empty row as a missing control, and a reader cannot
 tell "not answered" from "answered: anything"); refusing to save until the city is declared (the
 filters are legitimately set before the profile, and the server accepts the filter either way).
+
+## D26. "Связаться с хозяином": a deliberate inbox with subsections, under a retention deadline
+
+**Context.** The owner asked (2026-10-19) for a way for users to reach him, split into subsections
+(жалобы, предложения, реклама, сотрудничество и т.д.). Abuse reports already existed, but they are
+bound to a chat and a message, composed by the server, and they are a moderation record — there was
+no way to send a suggestion, a defect report or an advertising enquiry at all.
+
+**Decision.** One form, one storage table (`OwnerMessage`), and subsections expressed as a fixed
+`OwnerMessageTopic` vocabulary (`abuse`, `suggestion`, `bug`, `advertising`, `partnership`, `other`)
+rendered as radio chips in the form and as labels in the owner's inbox. The text is bounded
+(`OWNER_MESSAGE_MAX_LENGTH = 2000`), the optional "how can we reach you" line is free text
+(`OWNER_CONTACT_MAX_LENGTH = 200`, unvalidated), and the sender's User ID is taken from the session —
+never from the body — so nobody can file a message as somebody else. The budget is per identity and
+small (`RATE_LIMIT_OWNER_MESSAGE_PER_DAY`, default 5): an unlimited operator inbox is a spam target.
+
+This is the second place user-written text is stored on purpose (the first is `Report.messageSnapshot`),
+so it carries the obligation the archive does **not**: the form says, before sending, that the message
+is stored, that the owner sees the sender's User ID, and that it is deleted after a retention period
+(`OWNER_MESSAGE_RETENTION_DAYS`, default 180, enforced by the maintenance sweep). The owner reads the
+inbox on the existing admin surface (`GET`/`DELETE /api/v1/admin/messages`), because the owner's key
+opens one place, not two; `OwnerMessageService` is the storage, `ArchiveModule` renders it.
+
+**Consequences.** The inbox is a growing table of user text until the sweep runs, readable by whoever
+holds `ADMIN_TOKEN` — the same boundary as the archive, with the one difference that users are told.
+Deleting is the only state change; there is no read/unread flag, because that would invite a workflow
+this product does not have. The route needs a session like every other action, so a user whose browser
+cannot obtain one cannot write in — worth revisiting only if that ever becomes the reason someone wants
+to write. There is **no** notification: the owner finds messages by opening the page, and an answer goes
+to whatever contact the sender chose to leave (or nowhere, if they left none).
+
+**Rejected.** Reusing `Report` with a nullable chat (a report is server-composed and tied to a message;
+merging would have forced one retention policy and one status machine on two different things);
+a free-text topic field (nothing to triage with, and the same word spelled five ways); requiring an
+e-mail (a sign-up field in disguise, in a product whose point is that there is nothing to sign up
+with); e-mailing the owner (a delivery mechanism the service does not have, and a copy of every
+message outside its own retention); read/unread status (see above); making the route `@Anonymous()`
+(the rate limit and the "who wrote this" both become guesswork).

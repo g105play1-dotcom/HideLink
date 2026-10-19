@@ -20,7 +20,7 @@ import { ErrorCode } from '@anonlink/shared';
  */
 
 export type RateLimitBucket =
-  'http' | 'sessionCreate' | 'chatMessage' | 'lookup' | 'connectRequest';
+  'http' | 'sessionCreate' | 'chatMessage' | 'lookup' | 'connectRequest' | 'ownerMessage';
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -107,6 +107,11 @@ export class RateLimitService {
       chatMessage: new TokenBucket(config.RATE_LIMIT_CHAT_MESSAGES_PER_10S, 10_000),
       lookup: new TokenBucket(config.RATE_LIMIT_LOOKUP_PER_MINUTE, 60_000),
       connectRequest: new TokenBucket(config.RATE_LIMIT_CONNECT_REQUEST_PER_MINUTE, 60_000),
+      ownerMessage: new TokenBucket(
+        config.RATE_LIMIT_OWNER_MESSAGE_PER_DAY,
+        24 * 60 * 60 * 1000,
+        50_000,
+      ),
     };
   }
 
@@ -137,6 +142,7 @@ export class RateLimitService {
       chatMessage: this.buckets.chatMessage.size,
       lookup: this.buckets.lookup.size,
       connectRequest: this.buckets.connectRequest.size,
+      ownerMessage: this.buckets.ownerMessage.size,
     };
   }
 }

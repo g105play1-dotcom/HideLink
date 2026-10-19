@@ -89,6 +89,14 @@ const envSchema = z.object({
   RATE_LIMIT_CHAT_MESSAGES_PER_10S: z.coerce.number().int().min(1).default(20),
   RATE_LIMIT_LOOKUP_PER_MINUTE: z.coerce.number().int().min(1).default(20),
   RATE_LIMIT_CONNECT_REQUEST_PER_MINUTE: z.coerce.number().int().min(1).default(10),
+  /**
+   * How many "contact the owner" messages one identity may send per day.
+   *
+   * Deliberately low: the form is for a handful of considered messages, not a channel, and
+   * an unlimited inbox is a spam target. Keyed by identity, not by address, so people
+   * behind a shared connection do not spend each other's budget.
+   */
+  RATE_LIMIT_OWNER_MESSAGE_PER_DAY: z.coerce.number().int().min(1).default(5),
   MAX_SOCKETS_PER_USER: z.coerce.number().int().min(1).max(50).default(4),
   MAX_PENDING_REQUESTS_PER_USER: z.coerce.number().int().min(1).max(20).default(3),
 
@@ -96,6 +104,15 @@ const envSchema = z.object({
   REPORT_RETENTION_DAYS: z.coerce.number().int().min(1).default(30),
   SESSION_RETENTION_DAYS: z.coerce.number().int().min(1).default(7),
   SECURITY_EVENT_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
+  /**
+   * How long a "contact the owner" message is kept before the maintenance job deletes it.
+   *
+   * Longer than a report on purpose: a suggestion or an advertising enquiry is not an
+   * incident to investigate within days, it is correspondence, and losing it after a month
+   * would make the feature useless. It is still bounded — a growing pile of user text is
+   * exactly the kind of state this service refuses to keep by default.
+   */
+  OWNER_MESSAGE_RETENTION_DAYS: z.coerce.number().int().min(1).default(180),
 
   /**
    * Optional salt enabling storage of hashed client IP / User-Agent for abuse

@@ -1,5 +1,5 @@
 import type { ArchivePolicy } from './archive.js';
-import type { ChatKind, IncomingRequestPolicy } from './limits.js';
+import type { ChatKind, IncomingRequestPolicy, OwnerMessageTopic } from './limits.js';
 import type { DeclaredProfile, SearchPreferences } from './preferences.js';
 
 /**
@@ -140,3 +140,32 @@ export interface ArchiveDeletionResponse {
 
 /** The policy as returned by the admin endpoints. */
 export type ArchivePolicyView = ArchivePolicy;
+
+/**
+ * One message a user sent the owner through the "contact the owner" form.
+ *
+ * Unlike a chat message this text *is* stored — the user wrote it precisely so that a
+ * human would read it — which is why the form says so and why the row carries a retention
+ * deadline. See docs/DECISIONS.md D26 and docs/SECURITY.md.
+ */
+export interface OwnerMessageView {
+  id: string;
+  topic: OwnerMessageTopic;
+  text: string;
+  /** How the owner was asked to reply, in the sender's own words. `null` = nothing left. */
+  contact: string | null;
+  /** The sender's User ID, or `null` when the identity row is gone. */
+  publicId: string | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface OwnerMessageListResponse {
+  messages: OwnerMessageView[];
+}
+
+/** What the sender is told after filing a message: an id and when it will be gone. */
+export interface OwnerMessageCreatedResponse {
+  id: string;
+  expiresAt: string;
+}

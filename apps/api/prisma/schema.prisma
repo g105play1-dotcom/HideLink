@@ -75,6 +75,22 @@ enum ReportStatus {
   dismissed
 }
 
+/// The subsection a user picked in the "contact the owner" form.
+enum OwnerMessageTopic {
+  /// A complaint about another user or about content.
+  abuse
+  /// An idea for the product.
+  suggestion
+  /// A defect report.
+  bug
+  /// An advertising enquiry.
+  advertising
+  /// A partnership / cooperation enquiry.
+  partnership
+  /// Anything that does not fit the boxes above.
+  other
+}
+
 // -----------------------------------------------------------------------------
 // Identity
 // -----------------------------------------------------------------------------
@@ -149,6 +165,7 @@ model Identity {
   blocksReceived Block[]       @relation("BlockTarget")
   securityEvents SecurityEvent[]
   archiveSubjects ArchiveSubject[]
+  ownerMessages OwnerMessage[]
 
   @@index([lastSeenAt])
   @@index([bannedAt])
@@ -307,6 +324,43 @@ model SecurityEvent {
   @@index([type, createdAt])
   @@index([identityId, createdAt])
   @@index([expiresAt])
+}
+
+// -----------------------------------------------------------------------------
+// Contact the owner
+// -----------------------------------------------------------------------------
+
+/// A message a user deliberately addressed to the operator.
+///
+/// This is the second place where user-written text is stored on purpose, next to
+/// `Report.messageSnapshot`, and it is deliberate for the same reason: the whole point of
+/// the form is that a human reads it. Three things keep that honest —
+///   * the user is told before sending (the form says the message is stored and will be
+///     deleted after a retention period), unlike the silent archive of D21;
+///   * the row is retention-bound (`expiresAt`, enforced by the maintenance job);
+///   * the owner can delete any message, or all of them, at once.
+/// See docs/DECISIONS.md D26 and docs/SECURITY.md.
+model OwnerMessage {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  /// The sender. `publicId` is read through the relation rather than duplicated here.
+  identityId String? @db.Uuid
+
+  topic OwnerMessageTopic
+  text  String            @db.VarChar(2000)
+  /// How the owner can answer, in the sender's own words. Optional and unverified:
+  /// nothing checks that this is an e-mail or a phone number, and nothing sends to it.
+  contact String? @db.VarChar(200)
+
+  createdAt DateTime @db.Timestamptz(3) @default(now())
+  /// Retention deadline. The maintenance job hard-deletes expired rows.
+  expiresAt DateTime @db.Timestamptz(3)
+
+  identity Identity? @relation(fields: [identityId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@index([topic, createdAt])
 }
 
 // -----------------------------------------------------------------------------

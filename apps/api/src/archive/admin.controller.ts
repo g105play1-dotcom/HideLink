@@ -16,6 +16,8 @@ import {
   archivePolicySchema,
   adminConfirmSchema,
   adminIdentityQuerySchema,
+  ownerMessageListQuerySchema,
+  ownerMessageParamsSchema,
   type AdminConfirmInput,
   type AdminIdentityListResponse,
   type AdminIdentityQuery,
@@ -26,12 +28,16 @@ import {
   type ArchivePolicy,
   type ArchivePolicyView,
   type ArchivedChatView,
+  type OwnerMessageListQuery,
+  type OwnerMessageListResponse,
+  type OwnerMessageParams,
   ErrorCode,
 } from '@anonlink/shared';
 
 import { AppError } from '../common/app-error.js';
 import { zodBody, zodParam, zodQuery } from '../common/zod-validation.pipe.js';
 import { Anonymous } from '../identity/request-context.js';
+import { OwnerMessageService } from '../owner/owner.service.js';
 import { AdminGuard } from './admin.guard.js';
 import { ArchiveService } from './archive.service.js';
 
@@ -47,7 +53,10 @@ import { ArchiveService } from './archive.service.js';
 @Anonymous()
 @UseGuards(AdminGuard)
 export class AdminController {
-  constructor(private readonly archive: ArchiveService) {}
+  constructor(
+    private readonly archive: ArchiveService,
+    private readonly inbox: OwnerMessageService,
+  ) {}
 
   /** The policy in force, including who it currently covers. */
   @Get('policy')
@@ -116,5 +125,29 @@ export class AdminController {
     @Body(zodBody(adminConfirmSchema)) _body: AdminConfirmInput,
   ): Promise<ArchiveDeletionResponse> {
     return this.archive.deleteAll();
+  }
+
+  // ---------------------------------------------------------------------------
+  // The inbox — "contact the owner"
+  //
+  // On this controller rather than one of its own because the *owner surface* is one
+  // thing: whoever holds the key reads the archive and the messages users wrote in the
+  // same place. The storage itself lives in `OwnerMessageService`.
+  // ---------------------------------------------------------------------------
+
+  /** Messages users wrote to the owner, newest first. */
+  @Get('messages')
+  async listMessages(
+    @Query(zodQuery(ownerMessageListQuerySchema)) query: OwnerMessageListQuery,
+  ): Promise<OwnerMessageListResponse> {
+    return this.inbox.list(query.limit);
+  }
+
+  /** Deletes one message. Idempotent: `deleted: false` when it was already gone. */
+  @Delete('messages/:id')
+  async deleteMessage(
+    @Param(zodParam(ownerMessageParamsSchema)) params: OwnerMessageParams,
+  ): Promise<{ deleted: boolean }> {
+    return this.inbox.delete(params.id);
   }
 }

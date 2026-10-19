@@ -1,12 +1,13 @@
 'use client';
 
-import { LoaderCircle, MessageSquare, RefreshCw, TriangleAlert } from 'lucide-react';
+import { LoaderCircle, Mail, MessageSquare, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 
 import { AdSlot } from '@/components/ad-slot';
 import { BlockDialog } from '@/components/block-dialog';
 import { ChatPanel } from '@/components/chat-panel';
 import { ConnectionBadge } from '@/components/connection-badge';
+import { ContactOwnerDialog } from '@/components/contact-owner-dialog';
 import { DirectSearch } from '@/components/direct-search';
 import { IdentityStrip } from '@/components/identity-strip';
 import { IncomingRequestDialog } from '@/components/incoming-request-dialog';
@@ -43,6 +44,7 @@ export function HomeScreen() {
 
   const [reporting, setReporting] = useState(false);
   const [blocking, setBlocking] = useState(false);
+  const [contacting, setContacting] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
   const inChat = phase === 'chatting' || phase === 'ended';
@@ -133,6 +135,23 @@ export function HomeScreen() {
             </>
           )}
         </main>
+
+        {/*
+          The one way to reach a human. It lives in the footer rather than in the settings
+          drawer on purpose: "связаться с хозяином" is not a preference, and someone who is
+          annoyed with the service should not have to open their own profile to say so.
+        */}
+        <footer className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-muted-foreground">
+          <span>Анонимный чат с незнакомцами</span>
+          <button
+            type="button"
+            onClick={() => setContacting(true)}
+            className="inline-flex items-center gap-1.5 font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+          >
+            <Mail className="size-3.5" aria-hidden="true" />
+            Связаться с хозяином
+          </button>
+        </footer>
       </div>
 
       <AdRail side="right" />
@@ -140,6 +159,7 @@ export function HomeScreen() {
       <IncomingRequestDialog />
       <ReportDialog open={reporting} onClose={() => setReporting(false)} />
       <BlockDialog open={blocking} onClose={() => setBlocking(false)} />
+      <ContactOwnerDialog open={contacting} onClose={() => setContacting(false)} />
       <Toaster />
     </div>
   );

@@ -7,6 +7,9 @@ import {
   CLIENT_MESSAGE_ID_MAX_LENGTH,
   CONNECT_REQUEST_NOTE_MAX_LENGTH,
   MESSAGE_MIN_LENGTH,
+  OWNER_CONTACT_MAX_LENGTH,
+  OWNER_MESSAGE_MAX_LENGTH,
+  OWNER_MESSAGE_TOPICS,
   REPORT_REASONS,
 } from './limits.js';
 import type { SettingsUpdate } from './preferences.js';
@@ -138,6 +141,23 @@ export type ConnectRespondInput = z.infer<typeof connectRespondSchema>;
 export type ReportInput = z.infer<typeof reportSchema>;
 export type SettingsInput = SettingsUpdate;
 
+/**
+ * REST: `POST /api/v1/owner/messages` — the "contact the owner" form.
+ *
+ * The sender's identity is *not* part of the body: the server takes it from the session,
+ * so a client cannot file a message as somebody else. `contact` stays free text on
+ * purpose (see `OWNER_CONTACT_MAX_LENGTH`).
+ */
+export const ownerMessageSchema = z
+  .object({
+    topic: z.enum(OWNER_MESSAGE_TOPICS),
+    text: z.string().trim().min(1).max(OWNER_MESSAGE_MAX_LENGTH),
+    contact: z.string().trim().max(OWNER_CONTACT_MAX_LENGTH).optional(),
+  })
+  .strict();
+
+export type OwnerMessageInput = z.infer<typeof ownerMessageSchema>;
+
 // -----------------------------------------------------------------------------
 // Owner (admin) surface
 // -----------------------------------------------------------------------------
@@ -172,8 +192,18 @@ export const archiveParamsSchema = z.object({ chatId: chatIdSchema }).strict();
  */
 export const adminConfirmSchema = z.object({ confirm: z.literal(true) }).strict();
 
+/** REST: `GET /api/v1/admin/messages?limit=` — the owner's inbox. */
+export const ownerMessageListQuerySchema = z
+  .object({ limit: z.coerce.number().int().min(1).max(200).optional() })
+  .strict();
+
+/** REST: `DELETE /api/v1/admin/messages/:id` */
+export const ownerMessageParamsSchema = z.object({ id: z.uuid() }).strict();
+
 export type AdminSessionInput = z.infer<typeof adminSessionSchema>;
 export type AdminIdentityQuery = z.infer<typeof adminIdentityQuerySchema>;
 export type ArchiveListQuery = z.infer<typeof archiveListQuerySchema>;
 export type ArchiveParams = z.infer<typeof archiveParamsSchema>;
 export type AdminConfirmInput = z.infer<typeof adminConfirmSchema>;
+export type OwnerMessageListQuery = z.infer<typeof ownerMessageListQuerySchema>;
+export type OwnerMessageParams = z.infer<typeof ownerMessageParamsSchema>;

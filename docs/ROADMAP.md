@@ -18,6 +18,7 @@ not.
 | **H. Stabilisation** | Tests, lint, types, build, documentation, compliance table | **Done for the scope above**, with the explicit gaps listed below. |
 | **I. Growth preparation** | Redis seam, media seam, monetisation readiness, deployment sketch | **Partly done, on purpose.** Seams and documentation exist; no second instance, no media, no ads, no payments. |
 | **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is verified by hand only. |
+| **K. Contact the owner** | A form with subsections (жалобы, предложения, реклама, сотрудничество, …) writing into an owner-only inbox with a retention deadline (owner request 2026-10-19) | **Done.** `DECISIONS.md` D26, `SECURITY.md` §13.1, `owner-messages.test.ts`, `contact-owner.spec.ts`; the inbox is rendered on the same `/admin` page as the archive. |
 
 ## Verified by automation
 
@@ -70,9 +71,9 @@ cost — not in code quality.
    rehearsal that treats transcripts as the sensitive asset. One decision remains genuinely open below
    (item 6).
 3. **Retention defaults.** `REPORT_RETENTION_DAYS=30`, `SESSION_RETENTION_DAYS=7`,
-   `SECURITY_EVENT_RETENTION_DAYS=90` are placeholders chosen for reasonableness, not for any
-   jurisdiction. They may need to match local law. The archive's `retentionDays` is chosen at `/admin`
-   and starts at 90.
+   `SECURITY_EVENT_RETENTION_DAYS=90`, `OWNER_MESSAGE_RETENTION_DAYS=180` are placeholders chosen for
+   reasonableness, not for any jurisdiction. They may need to match local law. The archive's
+   `retentionDays` is chosen at `/admin` and starts at 90.
 4. **Abuse investigation.** Whether `ABUSE_HASH_SALT` should be set in production (enables hashed
    IP/User-Agent correlation) or left unset (stores no client identifiers at all).
 5. **Hosting and cost.** Everything currently runs locally with no paid or remote resources. A public

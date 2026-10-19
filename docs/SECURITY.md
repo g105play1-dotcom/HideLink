@@ -25,6 +25,7 @@ The privacy posture is a storage decision, not a policy paragraph.
 | Chat messages | **Only if the owner switches archiving on** — it is off by default. Otherwise in memory only, bounded by `CHAT_MEMORY_MESSAGE_LIMIT`, dropped when the chat ends. The archive is described in §13. |
 | Who talked to whom | `ChatSession` always records lifecycle metadata (participants, start/end, `messageCount`, end reason) — never text. A transcript exists only for chats the owner's archive policy selected (§13). |
 | Message text of a reported message | Only inside the abuse report, until `REPORT_RETENTION_DAYS` (default 30) elapses, then hard-deleted. |
+| Message text sent through "Связаться с хозяином" | **Yes, on purpose** — the user asked a human to read it, and is told so before sending. Bounded by `OWNER_MESSAGE_MAX_LENGTH`, deleted after `OWNER_MESSAGE_RETENTION_DAYS` (default 180), readable only with `ADMIN_TOKEN` (§13.1). |
 | Name, e-mail, phone, address, GPS, device id | **Never asked for, never stored.** There is no code path that accepts them. |
 | Client IP / User-Agent | **Not stored by default.** Only a salted SHA-256 digest, and only when `ABUSE_HASH_SALT` is deliberately set. |
 | Session token | Only its SHA-256 digest (`IdentityService.createIdentity` → `sha256Hex(token)`). |
@@ -35,7 +36,9 @@ every table for a message that was just sent; it also asserts the column set of 
 rejects columns whose names imply captured contact data. It is the enforcement mechanism for the
 *default* installation — archiving off, nothing stored. `apps/api/test/archive.test.ts` is the other
 half: it turns the archive on, proves what is stored and for whom, and proves that switching it off
-stops recording immediately. Neither file should be weakened.
+stops recording immediately. Neither file should be weakened. `apps/api/test/owner-messages.test.ts`
+covers the deliberate text of §13.1, which is written by the user rather than captured, and is the
+only stored text a user is told about.
 
 ## 3. Threat model
 
@@ -238,6 +241,7 @@ which is the enforcement point for every deadline in the schema:
 | Security events | after `SECURITY_EVENT_RETENTION_DAYS` (90) |
 | Sessions | after `SESSION_RETENTION_DAYS` (7) past expiring or being revoked |
 | Archived conversations (§13) | after the owner's `retentionDays`; `0` means only when the owner deletes them |
+| "Связаться с хозяином" messages (§13.1) | after `OWNER_MESSAGE_RETENTION_DAYS` (180) |
 | Finished chats in memory | after their tombstone expires (`ChatRegistryService.sweep`) |
 | Stale queue tickets, expired requests, rate-limit keys | every sweep |
 
@@ -292,6 +296,32 @@ the page.
 
 Moderators are a separate matter: there is still no moderation console, and a report carries only the
 single snapshotted message that was reported.
+
+### 13.1 The owner's inbox ("Связаться с хозяином")
+
+A user who wants to reach the operator fills one form (topic, text, optional contact line). Unlike
+everything else a user writes, this text is stored on purpose — the point of the form is that a human
+reads it — so the controls are about *bounding* it rather than avoiding it:
+
+- **The user is told.** The form states, before sending, that the message is stored, that the owner
+  sees the sender's User ID and that it is deleted after a retention period. That is the deliberate
+  difference from the archive (§13), which is silent (`docs/DECISIONS.md` D26).
+- **Bounded size.** `OWNER_MESSAGE_MAX_LENGTH` (2000) for the text, `OWNER_CONTACT_MAX_LENGTH` (200)
+  for the optional contact line. The topic is a fixed vocabulary, so nothing arbitrary is indexed or
+  rendered as a category.
+- **Bounded rate.** `RATE_LIMIT_OWNER_MESSAGE_PER_DAY` (5) per identity, in the same token-bucket
+  limiter as everything else (§7); trips are never persisted.
+- **Bounded life.** `OWNER_MESSAGE_RETENTION_DAYS` (180) by default, enforced by the maintenance
+  sweep; the owner can delete one message or the whole inbox at any time.
+- **Sender from the session.** The request body cannot carry an identity: `POST /api/v1/owner/messages`
+  takes it from the authenticated session, and the schema is `.strict()`, so a forged field is a
+  rejection rather than a silently ignored value.
+- **The owner's boundary.** `GET`/`DELETE /api/v1/admin/messages` sit behind the same `AdminGuard` as
+  the archive: with no `ADMIN_TOKEN` the route does not exist at all.
+
+The message text is plaintext in PostgreSQL, like the archive. The contact line is free text and is
+**not** verified: nothing sends to it, so a user cannot be turned into an outbound relay, and a forged
+value can only mislead the owner's own reply.
 
 ## 14. Known gaps and what must happen before a public deployment
 

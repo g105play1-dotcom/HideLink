@@ -16,12 +16,15 @@ import {
   type Gender,
   type Language,
   type MediaKind,
+  type OwnerMessageListResponse,
+  type OwnerMessageView,
 } from '@anonlink/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveRestore,
   CircleAlert,
   Eraser,
+  Inbox,
   KeyRound,
   LoaderCircle,
   LogOut,
@@ -30,11 +33,13 @@ import {
 } from 'lucide-react';
 import { useState, type FormEvent, type ReactNode } from 'react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { describeError } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
+import { OWNER_TOPIC_LABELS } from '@/lib/labels';
 
 /**
  * The owner's archive page.
@@ -291,6 +296,13 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
     retry: false,
   });
 
+  const inbox = useQuery({
+    queryKey: ['admin', 'messages'],
+    queryFn: () => apiRequest<OwnerMessageListResponse>('/admin/messages'),
+    refetchInterval: 10_000,
+    retry: false,
+  });
+
   const [openChatId, setOpenChatId] = useState<string | null>(null);
 
   // Signing out and re-entering the key both have to drop the cached policy, because the
@@ -300,6 +312,7 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
   const forgetSession = () => {
     queryClient.removeQueries({ queryKey: ['admin', 'policy'] });
     queryClient.removeQueries({ queryKey: ['admin', 'archives'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'messages'] });
   };
 
   const lock = useMutation({
@@ -312,7 +325,8 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
 
   const expired =
     (policy.isError && readCode(policy.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
-    (archives.isError && readCode(archives.error) === ErrorCode.ADMIN_AUTH_REQUIRED);
+    (archives.isError && readCode(archives.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
+    (inbox.isError && readCode(inbox.error) === ErrorCode.ADMIN_AUTH_REQUIRED);
 
   if (expired) {
     return (
@@ -359,6 +373,12 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
       {policy.isError ? <ErrorLine error={policy.error} /> : null}
 
       {policy.isSuccess ? <PolicyEditor policy={policy.data} /> : null}
+
+      <OwnerInbox
+        messages={inbox.data?.messages ?? []}
+        loading={inbox.isPending}
+        error={inbox.isError ? inbox.error : null}
+      />
 
       <ArchiveList
         archives={archives.data?.archives ?? []}
@@ -781,6 +801,97 @@ function PolicyEditor({ policy }: { policy: ArchivePolicy }) {
             </Button>
           </div>
         </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OwnerInbox({
+  messages,
+  loading,
+  error,
+}: {
+  messages: readonly OwnerMessageView[];
+  loading: boolean;
+  error: unknown;
+}) {
+  const queryClient = useQueryClient();
+
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      apiRequest<{ deleted: boolean }>(`/admin/messages/${id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'messages'] }),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Inbox className="size-4" aria-hidden="true" />
+          Сообщения от пользователей
+        </CardTitle>
+        <CardDescription>
+          Всё, что прислали через «Связаться с хозяином»: жалобы, предложения, вопросы по рекламе и
+          сотрудничеству. Список обновляется автоматически; просроченные сообщения удаляются сами.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">
+        {remove.isError ? <ErrorLine error={remove.error} /> : null}
+
+        {loading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю сообщения…
+          </p>
+        ) : null}
+
+        {error ? <ErrorLine error={error} /> : null}
+
+        {!loading && !error && messages.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока сообщений нет.</p>
+        ) : null}
+
+        {messages.length > 0 ? (
+          <ul className="flex flex-col gap-3">
+            {messages.map((message) => (
+              <li key={message.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge variant="accent">{OWNER_TOPIC_LABELS[message.topic]}</Badge>
+                    <span className="text-muted-foreground">
+                      {formatTimestamp(message.createdAt)}
+                    </span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (!window.confirm('Удалить это сообщение безвозвратно?')) return;
+                      remove.mutate(message.id);
+                    }}
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                    Удалить
+                  </Button>
+                </div>
+
+                <p className="mt-2 text-sm whitespace-pre-wrap">{message.text}</p>
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {message.publicId ? (
+                    <>
+                      User ID: <span className="font-mono">{message.publicId}</span> ·{' '}
+                    </>
+                  ) : null}
+                  {message.contact ? <>Связь: {message.contact} · </> : null}
+                  удалится {formatTimestamp(message.expiresAt)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </CardContent>
     </Card>
   );

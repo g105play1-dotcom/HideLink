@@ -147,6 +147,7 @@ describe('RateLimitService', () => {
       chatMessage: 0,
       lookup: 0,
       connectRequest: 0,
+      ownerMessage: 0,
     });
   });
 
@@ -163,6 +164,7 @@ describe('RateLimitService', () => {
       chatMessage: 0,
       lookup: 0,
       connectRequest: 0,
+      ownerMessage: 0,
     });
   });
 });
