@@ -1,0 +1,22 @@
+{
+  "name": "@anonlink/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end tests: real browsers, the real API, a real database",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:headed": "playwright test --headed",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "report": "playwright show-report .results/report"
+  },
+  "devDependencies": {
+    "@anonlink/protocol": "workspace:*",
+    "@anonlink/shared": "workspace:*",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
+    "dotenv": "18.0.8",
+    "socket.io-client": "4.8.4",
+    "typescript": "5.9.3"
+  }
+}

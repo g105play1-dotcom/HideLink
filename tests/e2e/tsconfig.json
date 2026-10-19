@@ -1,0 +1,26 @@
+{
+  "//": [
+    "Playwright compiles these files itself and resolves imports the way a bundler does,",
+    "so this package deliberately does not extend tsconfig.base.json: that base targets",
+    "`nodenext` (explicit .js extensions in relative imports), which Playwright's own",
+    "transform does not require. The imports here are extensionless because they are the",
+    "one form that works both in Playwright's runtime and in `tsc --noEmit`."
+  ],
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", ".results"]
+}
