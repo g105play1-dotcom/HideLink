@@ -442,6 +442,8 @@ export class ChatService implements OnApplicationShutdown {
 
   /** Blocks the peer of the chat the caller is in, ending the chat as a side effect. */
   async blockPeerOfChat(blockerId: string, chatId: string): Promise<{ publicId: string }> {
+    await this.assertBlockingAllowed(blockerId);
+
     const chat = this.registry.get(chatId);
     if (!chat) throw new AppError(ErrorCode.CHAT_NOT_FOUND);
     if (!chat.hasParticipant(blockerId)) throw new AppError(ErrorCode.NOT_A_PARTICIPANT);
@@ -472,6 +474,7 @@ export class ChatService implements OnApplicationShutdown {
 
   /** Blocks a User ID outside of a chat (e.g. after a declined invitation). */
   async blockByPublicId(blockerId: string, publicId: string): Promise<{ publicId: string }> {
+    await this.assertBlockingAllowed(blockerId);
     await this.directory.ensureLoaded(blockerId);
     const facts = this.requireFacts(blockerId);
 
@@ -504,6 +507,24 @@ export class ChatService implements OnApplicationShutdown {
     const target = await this.moderation.findByPublicId(publicId);
     if (!target) throw new AppError(ErrorCode.USER_NOT_FOUND);
     return this.moderation.unblock(blockerId, target.id);
+  }
+
+  /**
+   * Refuses to create a block when the user has switched the feature off.
+   *
+   * Checked on the server, not only by hiding the button: a tab that was left open
+   * before the setting changed would otherwise still be able to block, and the setting
+   * would be decoration (AGENTS §1: the server is the authority).
+   *
+   * Deliberately only guards *creating* a block. Unblocking stays possible in both
+   * directions — wanting the feature off must never trap the user with a block they
+   * cannot remove, and this method is not called on the unblock path.
+   */
+  private async assertBlockingAllowed(blockerId: string): Promise<void> {
+    await this.directory.ensureLoaded(blockerId);
+    if (!this.directory.blockingAllowed(blockerId)) {
+      throw new AppError(ErrorCode.BLOCKING_DISABLED);
+    }
   }
 
   /**

@@ -30,6 +30,7 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   REQUEST_DECLINED: 'Заявка отклонена.',
   INCOMING_REQUESTS_DISABLED: 'Этот пользователь не принимает заявки.',
   BLOCKED: 'Общение с этим пользователем невозможно.',
+  BLOCKING_DISABLED: 'Блокировка отключена в ваших настройках.',
   UNSUPPORTED_EVENT: 'Неподдерживаемое событие. Обновите страницу.',
   ADMIN_AUTH_REQUIRED: 'Неверный ключ владельца.',
   FORBIDDEN_ORIGIN: 'Этот источник не может подключиться.',

@@ -80,6 +80,8 @@ function defaultMessage(code: ErrorCode): string {
       return 'This user does not accept direct requests.';
     case ErrorCode.BLOCKED:
       return 'Communication with this user is not possible.';
+    case ErrorCode.BLOCKING_DISABLED:
+      return 'Blocking is switched off in this identity settings.';
     case ErrorCode.UNSUPPORTED_EVENT:
       return 'Unsupported event.';
     case ErrorCode.ADMIN_AUTH_REQUIRED:
@@ -125,6 +127,7 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.REQUEST_DECLINED:
     case ErrorCode.INCOMING_REQUESTS_DISABLED:
     case ErrorCode.BLOCKED:
+    case ErrorCode.BLOCKING_DISABLED:
     case ErrorCode.SELF_TARGET_NOT_ALLOWED:
       return 409;
     case ErrorCode.RATE_LIMITED:

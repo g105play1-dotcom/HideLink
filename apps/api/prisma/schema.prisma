@@ -96,6 +96,15 @@ model Identity {
 
   incomingRequests IncomingRequestPolicy @default(everyone)
 
+  /// Whether the "block a peer" action is offered at all.
+  ///
+  /// Off hides the action *and* the blocked list in the interface, and the API refuses
+  /// to create a new block. It never removes an existing block: silently un-blocking
+  /// somebody the user had blocked would be a safety regression, so turning the feature
+  /// off only stops new blocks and the existing rows stay in force — visible again the
+  /// moment the user switches the feature back on. See docs/DECISIONS.md D24.
+  blockingEnabled Boolean @default(true)
+
   // ---------------------------------------------------------------------------
   // Voluntary, self-declared profile and search filters.
   //

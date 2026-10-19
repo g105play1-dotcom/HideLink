@@ -292,6 +292,9 @@ export class IdentityService {
   ): Promise<IdentitySettingsView | null> {
     const data: IdentitySettingsData = {
       ...(update.incomingRequests ? { incomingRequests: update.incomingRequests } : {}),
+      // A boolean cannot be tested for truthiness: `blockingEnabled: false` is a real
+      // value the user asked for, not "absent".
+      ...(update.blockingEnabled !== undefined ? { blockingEnabled: update.blockingEnabled } : {}),
       ...(update.profile ? profileToColumns(update.profile) : {}),
       ...(update.search ? preferencesToColumns(update.search) : {}),
     };

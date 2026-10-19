@@ -315,6 +315,9 @@ describe('sessions and identities', () => {
         'bannedAt',
         'bannedReason',
         'incomingRequests',
+        // A preference like the one above, not data about the person: whether the block
+        // action is offered at all (docs/DECISIONS.md D24).
+        'blockingEnabled',
         // Declared, voluntary, and never displayed to a peer.
         'declaredGender',
         'declaredBirthYear',

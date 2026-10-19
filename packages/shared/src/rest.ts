@@ -33,6 +33,13 @@ export interface SessionView {
  */
 export interface IdentitySettingsView {
   incomingRequests: IncomingRequestPolicy;
+  /**
+   * Whether the user wants the "block a peer" action available.
+   *
+   * Off means the action is not offered and the server refuses new blocks. Blocks that
+   * already exist are neither removed nor forgotten — see docs/DECISIONS.md D24.
+   */
+  blockingEnabled: boolean;
   /** What the owner says about themselves. Unverified; used only to evaluate filters. */
   profile: DeclaredProfile;
   /** How the owner wants random partners filtered. */

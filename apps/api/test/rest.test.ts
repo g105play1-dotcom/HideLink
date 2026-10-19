@@ -25,7 +25,7 @@ interface SessionBody {
   publicId: string;
   createdAt: string;
   sessionExpiresAt: string;
-  settings: { incomingRequests: string };
+  settings: { incomingRequests: string; blockingEnabled: boolean };
 }
 
 interface CurrentSessionBody {
@@ -281,6 +281,31 @@ describe('PATCH /me/settings', () => {
     expect(current.body.session?.settings.incomingRequests).toBe('nobody');
   });
 
+  it('round-trips the blocking switch, and another field does not reset it', async () => {
+    const owner = await createIdentity();
+
+    const off = await http<SessionBody>('/me/settings', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { blockingEnabled: false },
+    });
+    expect(off.body.settings.blockingEnabled).toBe(false);
+
+    // A partial patch is not a replacement: `false` is a real value, and a plain
+    // truthiness check would silently switch the feature back on whenever any *other*
+    // setting was saved — the user would find the button they removed reappear.
+    const other = await http<SessionBody>('/me/settings', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { incomingRequests: 'nobody' },
+    });
+    expect(other.body.settings.blockingEnabled).toBe(false);
+    expect(other.body.settings.incomingRequests).toBe('nobody');
+
+    const current = await http<CurrentSessionBody>('/session', { cookie: owner.cookie });
+    expect(current.body.session?.settings.blockingEnabled).toBe(false);
+  });
+
   it('rejects unknown fields rather than silently dropping them', async () => {
     const result = await http<ErrorBody>('/me/settings', {
       method: 'PATCH',
@@ -445,6 +470,71 @@ describe('blocks', () => {
 
     expect(result.status).toBe(401);
     expect(result.body.error.code).toBe(ErrorCode.IDENTITY_REQUIRED);
+  });
+
+  it('refuses a new block while the feature is switched off, and leaves the old ones in place', async () => {
+    const owner = await createIdentity();
+    const blockedEarlier = await createIdentity();
+    const target = await createIdentity();
+
+    await http('/blocks', {
+      method: 'POST',
+      cookie: owner.cookie,
+      body: { publicId: blockedEarlier.publicId },
+    });
+
+    const disabled = await http<{ settings: { blockingEnabled: boolean } }>('/me/settings', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { blockingEnabled: false },
+    });
+    expect(disabled.body.settings.blockingEnabled).toBe(false);
+
+    const refused = await http<ErrorBody>('/blocks', {
+      method: 'POST',
+      cookie: owner.cookie,
+      body: { publicId: target.publicId },
+    });
+    // Hiding the button is not enough: a tab left open before the setting changed would
+    // otherwise still be able to block, and the setting would be decoration.
+    expect(refused.body.error.code).toBe(ErrorCode.BLOCKING_DISABLED);
+    expect(refused.status).toBe(409);
+
+    // Switching the feature off means "I do not want this action", not "undo my blocks":
+    // the existing block survives, and the list stays readable so it can be undone.
+    const listed = await http<{ blocks: Array<{ publicId: string }> }>('/blocks', {
+      cookie: owner.cookie,
+    });
+    expect(listed.body.blocks.map((entry) => entry.publicId)).toEqual([blockedEarlier.publicId]);
+
+    const removed = await http<{ removed: boolean }>(`/blocks/${blockedEarlier.publicId}`, {
+      method: 'DELETE',
+      cookie: owner.cookie,
+    });
+    expect(removed.body.removed).toBe(true);
+  });
+
+  it('allows blocking again once the feature is switched back on', async () => {
+    const owner = await createIdentity();
+    const target = await createIdentity();
+
+    await http('/me/settings', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { blockingEnabled: false },
+    });
+    await http('/me/settings', {
+      method: 'PATCH',
+      cookie: owner.cookie,
+      body: { blockingEnabled: true },
+    });
+
+    const added = await http<{ publicId: string }>('/blocks', {
+      method: 'POST',
+      cookie: owner.cookie,
+      body: { publicId: target.publicId },
+    });
+    expect(added.status).toBe(201);
   });
 });
 

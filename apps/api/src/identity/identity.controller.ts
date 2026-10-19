@@ -199,6 +199,9 @@ export class UsersController {
 
     const updated = await this.identityService.updateSettings(identity.userId, {
       ...(settings.incomingRequests ? { incomingRequests: settings.incomingRequests } : {}),
+      ...(settings.blockingEnabled !== undefined
+        ? { blockingEnabled: settings.blockingEnabled }
+        : {}),
       ...(settings.profile ? { profile: settings.profile } : {}),
       ...(search ? { search } : {}),
     });
@@ -211,6 +214,7 @@ export class UsersController {
     // the next reconnect — the classic "saved but ignored" setting.
     this.directory.patch(identity.userId, {
       incomingRequests: updated.incomingRequests,
+      blockingEnabled: updated.blockingEnabled,
       profile: updated.profile,
       preferences: updated.search,
     });
