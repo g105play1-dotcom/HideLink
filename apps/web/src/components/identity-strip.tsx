@@ -83,6 +83,7 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
         <button
           type="button"
           id="own-user-id"
+          translate="no"
           onClick={() => void copyId()}
           title="Скопировать User ID"
           className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1 font-mono text-sm tracking-wider transition-colors select-all hover:border-primary hover:bg-accent/40"

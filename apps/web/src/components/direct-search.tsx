@@ -154,11 +154,25 @@ export function DirectSearch() {
                 a stranger quotes your User ID back at you.
               */}
               {ownPublicId ? (
-                <p className="text-xs text-muted-foreground">
-                  В отличие от случайного чата, получатель увидит ваш User ID{' '}
-                  <code className="font-mono">{formatPublicIdForDisplay(ownPublicId)}</code> — иначе
-                  он не поймёт, кто с ним хочет поговорить.
-                </p>
+                /*
+                  The ID used to sit *inside* this sentence as a `<code>`. That splits one
+                  sentence into three text nodes, and a browser translator translates each
+                  node on its own: the two halves arrive as unrelated fragments and the ID
+                  itself gets treated as a word (docs/DECISIONS.md D29). The sentence is now
+                  whole, and the ID is shown below it as a separate, untranslatable value.
+                */
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs text-muted-foreground">
+                    В отличие от случайного чата, получатель увидит ваш User ID — иначе он не
+                    поймёт, кто с ним хочет поговорить.
+                  </p>
+                  <code
+                    translate="no"
+                    className="w-fit rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
+                  >
+                    {formatPublicIdForDisplay(ownPublicId)}
+                  </code>
+                </div>
               ) : null}
             </>
           ) : (
@@ -171,14 +185,22 @@ export function DirectSearch() {
 
       {/* --- pending outgoing request --------------------------------------- */}
       {outgoingRequest ? (
-        <div className="rounded-lg border border-primary/40 bg-accent/40 p-3" role="status">
-          <p className="flex items-center gap-2 text-sm">
+        <div className="rounded-lg border border-primary/40 bg-accent/40 p-3">
+          {/*
+            The countdown lives on its own line, not inside the sentence. It changes every
+            second: inside a sentence a browser translator would re-translate the sentence
+            each tick, and a screen reader inside `role="status"` would announce it every
+            second. The value itself is marked untranslatable — digits and a unit letter.
+          */}
+          <p className="flex items-center gap-2 text-sm" role="status">
             <Timer className="size-4 shrink-0 text-primary" aria-hidden="true" />
-            Заявка отправлена. Ждём ответа — она истечёт через{' '}
-            <span className="font-mono tabular-nums">
+            Заявка отправлена. Ждём ответа.
+          </p>
+          <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+            <span>Истекает через:</span>
+            <span translate="no" className="font-mono tabular-nums">
               {formatRemaining(outgoingRequest.expiresAt, now)}
             </span>
-            .
           </p>
         </div>
       ) : null}

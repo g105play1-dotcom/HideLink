@@ -221,3 +221,25 @@ declared behaviour above is enforced on this machine, against a real database an
 `pnpm test:e2e` passing means the browser journeys in §5 work. None of it is a statement that the
 service is production-ready: the gaps in §6 — load, penetration, backup/restore, monitoring, HTTPS
 and the retention test — are exactly the things that a public launch depends on.
+
+## 9. Browser translation (manual — there is no automated equivalent)
+
+No test runner can drive Chrome's translator, so the rules in `docs/DECISIONS.md` D29 are checked by
+hand after any change that touches rendered text:
+
+1. Open the app in Chrome with the Russian interface and translate the page into a language the app
+   does not ship (right-click → «Перевести на английский», or any other).
+2. The whole page is translated — search screen, settings, dialogs, chat header. Nothing stays
+   Russian except User IDs.
+3. A User ID in the identity block, in the chat header and in the blocked list is byte-for-byte
+   unchanged, and clicking it still copies the same value.
+4. Start a search. The elapsed timer and the "next step" countdown keep ticking; the page does not
+   fall to the error boundary («Интерфейс дал сбой») and the sentence around them is not retranslated
+   once per second.
+5. Send messages in two languages from two browser contexts (for example Russian and Arabic). Each
+   message is translated as a whole, and the Arabic one is rendered right-to-left.
+6. Open and close the report, block, incoming-request and «Связаться с администрацией» dialogs while
+   the page is translated. No `NotFoundError` in the console and no blank screen.
+
+Step 6 is the one that catches the classic React-plus-translator failure: a translator replaces a
+text node, React later tries to remove that exact node, and the commit throws.

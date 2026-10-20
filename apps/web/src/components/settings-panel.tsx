@@ -942,7 +942,9 @@ function ModerationSection({ session }: { session: SessionInfo }) {
               key={block.publicId}
               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-2.5"
             >
-              <code className="font-mono text-sm">{block.publicId}</code>
+              <code translate="no" className="font-mono text-sm">
+                {block.publicId}
+              </code>
               <Button
                 variant="outline"
                 size="sm"

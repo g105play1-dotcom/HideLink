@@ -56,7 +56,16 @@ export function IncomingRequestDialog() {
             {current.alias}
           </span>
           {current.note ? (
-            <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+            /*
+              The note is written by the *sender*, not by us, so it is marked as unknown
+              language and auto-direction: a translator must detect it per message, and an
+              Arabic note must not inherit the Russian page direction (docs/DECISIONS.md D29).
+            */
+            <p
+              lang=""
+              dir="auto"
+              className="text-sm break-words whitespace-pre-wrap text-muted-foreground"
+            >
               {current.note}
             </p>
           ) : (
@@ -64,13 +73,28 @@ export function IncomingRequestDialog() {
           )}
         </div>
 
-        <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
-          <Timer className="size-3.5 shrink-0" aria-hidden="true" />
-          {expired
-            ? 'Время заявки истекло.'
-            : `Заявка истечёт через ${formatRemaining(current.expiresAt, now)}.`}
-          {waiting > 0 ? ` Ещё заявок в очереди: ${waiting}.` : ''}
-        </p>
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+          {/*
+            The live region holds the *state*, not the countdown: a per-second tick inside
+            `role="status"` is announced by a screen reader every second, and a browser
+            translator would re-translate the sentence on every tick (docs/DECISIONS.md D29).
+          */}
+          <p className="flex items-center gap-2" role="status">
+            <Timer className="size-3.5 shrink-0" aria-hidden="true" />
+            {expired ? 'Время заявки истекло.' : 'Заявка ждёт ответа.'}
+          </p>
+
+          {expired ? null : (
+            <p className="flex items-center gap-2">
+              <span>Истекает через:</span>
+              <span translate="no" className="font-mono tabular-nums">
+                {formatRemaining(current.expiresAt, now)}
+              </span>
+            </p>
+          )}
+
+          {waiting > 0 ? <p>{`Ещё заявок в очереди: ${waiting}.`}</p> : null}
+        </div>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" disabled={busy || expired} onClick={() => void respond(false)}>

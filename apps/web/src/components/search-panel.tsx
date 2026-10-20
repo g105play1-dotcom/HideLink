@@ -76,7 +76,11 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
               <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
               Ищем собеседника…
             </span>
-            <span className="font-mono text-xl tabular-nums" aria-label="Время ожидания">
+            <span
+              translate="no"
+              className="font-mono text-xl tabular-nums"
+              aria-label="Время ожидания"
+            >
               {searchingSince ? formatElapsed(searchingSince, now) : '00:00'}
             </span>
             <Button variant="outline" size="sm" onClick={() => void cancel()} disabled={pending}>
@@ -99,16 +103,30 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
 
             {relaxedCriteria.length > 0 ? (
               <p className="text-sm text-muted-foreground" role="status">
-                Уже снято:{' '}
-                {relaxedCriteria.map((criterion) => CRITERION_LABELS[criterion]).join(', ')}
+                {`Уже снято: ${relaxedCriteria
+                  .map((criterion) => CRITERION_LABELS[criterion])
+                  .join(', ')}`}
               </p>
             ) : null}
 
             {relaxAt ? (
-              <p className="text-xs text-muted-foreground">
-                Если никто не найдётся, через {formatRemaining(relaxAt, now)} сервер начнёт снимать
-                фильтры по одному и каждый раз сообщит, какой именно.
-              </p>
+              /*
+                The countdown is pulled out of the sentence and marked untranslatable: it
+                ticks every second, so inside a sentence a browser translator would retranslate
+                the whole sentence on every tick (docs/DECISIONS.md D29).
+              */
+              <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
+                <p>
+                  Если никто не найдётся, сервер начнёт снимать фильтры по одному и каждый раз
+                  сообщит, какой именно.
+                </p>
+                <p className="flex items-center gap-2">
+                  <span>До первого шага:</span>
+                  <span translate="no" className="font-mono tabular-nums">
+                    {formatRemaining(relaxAt, now)}
+                  </span>
+                </p>
+              </div>
             ) : null}
           </div>
 

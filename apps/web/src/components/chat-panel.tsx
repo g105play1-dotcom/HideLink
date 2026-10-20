@@ -147,7 +147,15 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
           </div>
 
           {chat.peerPublicId ? (
-            <code className="font-mono text-xs text-muted-foreground">{chat.peerPublicId}</code>
+            /*
+              `translate="no"` on the ID only: browser translators must keep translating the
+              interface and the messages (docs/DECISIONS.md D29), but a User ID is not a word.
+              Left translatable, it comes back with the letters swapped or the dashes moved,
+              and the user copies something that no longer resolves.
+            */
+            <code translate="no" className="font-mono text-xs text-muted-foreground">
+              {chat.peerPublicId}
+            </code>
           ) : null}
         </div>
 
@@ -252,7 +260,8 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="Введите сообщение… (Enter — отправить, Shift+Enter — новая строка)"
+              dir="auto"
+              placeholder="Введите сообщение…"
               className="max-h-40 min-h-10"
               aria-invalid={tooLong}
               {...(tooLong ? { 'aria-describedby': 'composer-length' } : {})}
@@ -264,11 +273,17 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
           </div>
 
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            <span>Текстовые сообщения.</span>
+            {/*
+              The keyboard hint is *visible* text rather than part of the placeholder:
+              browser translators do not translate `placeholder` attributes, and a Chinese
+              user would keep a Russian instruction inside the field (docs/DECISIONS.md D29).
+            */}
+            <span>Только текст. Enter — отправить, Shift+Enter — новая строка.</span>
             {/* Only shown near the limit, so it is a warning rather than noise. */}
             {draft.length > maxLength * 0.8 ? (
               <span
                 id="composer-length"
+                translate="no"
                 className={cn('font-mono tabular-nums', tooLong && 'text-destructive')}
               >
                 {draft.length}/{maxLength}
@@ -317,7 +332,20 @@ function MessageBubble({ message }: { message: UiMessage }) {
           failed && 'bg-destructive text-destructive-foreground',
         )}
       >
-        <span className="break-words whitespace-pre-wrap">{message.text}</span>
+        {/*
+          The message is one text node, deliberately: browser translators translate per text
+          node, and a message split across spans (linkified words, per-word styling) reaches
+          the translator as unrelated fragments and comes back as nonsense
+          (docs/DECISIONS.md D29).
+
+          `lang=""` means "language unknown", so a translator detects the language of this
+          message instead of assuming the interface language. `dir="auto"` picks the writing
+          direction from the first strong character — without it an Arabic or Hebrew message
+          is rendered left-to-right because the page is Russian.
+        */}
+        <span lang="" dir="auto" className="break-words whitespace-pre-wrap">
+          {message.text}
+        </span>
 
         <span
           className={cn(

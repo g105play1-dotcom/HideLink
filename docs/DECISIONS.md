@@ -584,3 +584,45 @@ no creative, no money, and no claim in the interface that any of it exists.
 not decorated, and D23 already rejected visible empty boxes); putting the slot *inside* the settings
 panel (it would be pushed down by the very content it is supposed to replace); showing a creative
 while the user is searching (the waiting screen is the one place where attention belongs to the wait).
+
+---
+
+## D29. Browser translation is a supported path, not an accident
+
+**Context.** The owner asked (2026-10-20) that both the interface and the chat transcript be
+translatable by ordinary browser translators (Chrome, Edge, Yandex) — for every language we do not
+ship ourselves. A reactive interface and a page translator both rewrite the same DOM, so this is a
+structural requirement, not a setting.
+
+**Decision.** The page stays fully translatable: no `translate="no"` on the document, no
+`notranslate` meta, and `<html lang>` must always name the language actually rendered. Exactly three
+things are marked `translate="no"`, because a translator would corrupt rather than translate them:
+User IDs (a code, not a word), countdowns and the message-length counter (digits that change every
+second), and nothing else.
+
+Two rules follow from how translators work — per text node, per block:
+
+1. **One sentence is one text node.** An ID used to sit inside a sentence as `<code>`, splitting it
+   into three nodes that a translator receives as unrelated fragments (`direct-search.tsx`). The ID is
+   now shown next to the sentence, not inside it. No `<code>`/`<strong>` inside a prose sentence in
+   user-facing components.
+2. **Volatile values live outside sentences and outside live regions.** A countdown is a label plus a
+   value (`Истекает через: 00:42`), not a number inside a sentence — otherwise a screen reader
+   announces it every second and a translator re-translates the sentence every second.
+
+User-authored text (messages, request notes) carries `lang=""` — language unknown, detect per
+message — and `dir="auto"`, so Arabic or Hebrew is not forced left-to-right by a Russian page.
+Keyboard hints are visible text rather than `placeholder` text, because translators do not translate
+placeholder attributes.
+
+**Consequences.** React can still update a translated page: a string lives inside an element, so
+removing it removes the element the translator rewrote, not a bare text node that no longer exists.
+That is best-effort, not a guarantee — no automated test can run a browser translator. `docs/TESTING.md`
+§9 is the manual checklist (translate to a language the app does not ship, exercise search, chat and
+every dialog, confirm no error boundary and no mangled IDs). The interface's own translations remain
+the primary path; browser translation is the fallback.
+
+**Rejected.** `translate="no"` on the whole app — the usual React workaround for translator-induced
+DOM mutations, and it makes the owner's requirement impossible; translating only the chat and not the
+interface (the interface is most of the text); shipping our own "translate" button (a second, worse
+translator, and it would need the very language list we are avoiding).
