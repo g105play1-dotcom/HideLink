@@ -25,25 +25,27 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 4 | **86** | pure unit |
+| `packages/shared` | 5 | **89** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
 | `apps/api` | 12 | **159** | 26 unit + 133 integration |
-| `tests/e2e` | 9 | **26** | browser, two independent contexts |
-| **Total** | **26** | **279** | |
+| `tests/e2e` | 9 | **27** | browser, two independent contexts |
+| **Total** | **27** | **283** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
 without a server; the ten integration files start a **real API process on port 3101** against the
 `*_test` database.
 
 **Last full run (2026-10-20, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `26 passed (3.0m)`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `27 passed (2.3m)`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
 ## 3. Unit suites
 
-**`packages/shared` (86)** — the rules both ends depend on, so they are tested once, here:
+**`packages/shared` (89)** — the rules both ends depend on, so they are tested once, here:
 
+- `languages.test.ts` (3) — the generated vocabulary has a name in every language, no duplicate
+  codes or native names, and a widened code (`ja`) is accepted while an unknown one (`xx`) is not.
 - `preferences.test.ts` (36) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
   folding (`Королёв` ≡ `  королев`) and the deduplication of a place list (`normalizePlaces`), the
   relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`, `relaxationStage`), and that an
@@ -105,7 +107,7 @@ exactly one, non-secret, machine-independent way.
 | Spec | Tests | Focus |
 | --- | --- | --- |
 | `matching.spec.ts` | 4 | Random match and bidirectional messages; ending a chat with distinct reasons for both sides; "next" starting a clean conversation; cancelling a search with a running timer |
-| `filters.spec.ts` | 3 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI |
+| `filters.spec.ts` | 4 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI; a declared gender withdrawn by pressing it again, survived across a reload |
 | `direct.spec.ts` | 4 | Request sent/accepted; request declined; incoming requests disabled (and the setting surviving a reload); self-request refused |
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |

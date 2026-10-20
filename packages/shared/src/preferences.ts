@@ -25,6 +25,8 @@
  */
 import { z } from 'zod';
 
+import { LANGUAGES, type Language } from './languages.js';
+
 // -----------------------------------------------------------------------------
 // Vocabularies
 // -----------------------------------------------------------------------------
@@ -44,12 +46,14 @@ export type Gender = (typeof GENDERS)[number];
 /**
  * Languages a chat can be held in.
  *
- * A short, fixed list rather than free text: it feeds a multi-select, it is validated on
- * the server, and comparing two free-text spellings of the same language would match
- * nothing.
+ * A fixed list rather than free text: it feeds a multi-select, it is validated on the
+ * server, and comparing two free-text spellings of the same language would match nothing.
+ *
+ * The list itself lives in `languages.ts` because it is *generated* from CLDR rather than
+ * maintained by hand (`scripts/generate-vocabularies.mjs`): every language is named in its
+ * own language, and widening the list is additive — the wire and the database carry the
+ * ISO code, so a stored value never becomes invalid.
  */
-export const LANGUAGES = ['ru', 'en', 'uk', 'kk', 'de', 'fr', 'es', 'tr', 'zh', 'ar'] as const;
-export type Language = (typeof LANGUAGES)[number];
 
 export const PROFILE_LIMITS = {
   /** Longest accepted place name. Free text, but bounded. */

@@ -626,3 +626,44 @@ the primary path; browser translation is the fallback.
 DOM mutations, and it makes the owner's requirement impossible; translating only the chat and not the
 interface (the interface is most of the text); shipping our own "translate" button (a second, worse
 translator, and it would need the very language list we are avoiding).
+
+---
+
+## D30. Languages and countries come from published vocabularies, not from memory
+
+**Context.** The owner asked (2026-10-20) for every major language, each named in its own language,
+and for a country selector, and said the lists should be taken ready-made from the internet rather
+than composed by hand. The original language list was ten codes typed by hand, named in Russian only.
+
+**Decision.** Both vocabularies are **generated and committed**, with the source URL and a snapshot
+date in the file header, by `scripts/generate-vocabularies.mjs`:
+
+- **Languages** (`packages/shared/src/languages.ts`): 76 ISO 639-1 codes — the most spoken languages
+  plus those a Russian-first audience is most likely to meet. `native` comes from that language's own
+  CLDR locale; `en`/`ru`/`zh` exist only to *search* the picker and are never displayed. The **code**
+  is the domain value: `languageSchema` validates it, `declaredLanguages`/`prefLanguages` store it,
+  matching compares it.
+- **Countries** (`apps/web/src/data/countries.ts`): the 194 UN members from mledoze/countries with
+  ISO 3166-1 alpha-2, the native common name, and en/ru/zh search aids.
+
+Generated and committed, rather than fetched at build time or installed as a package, because the
+build must not require GitHub, every dependency version here is pinned deliberately, and installing a
+new package is blocked in this environment (pnpm cannot create symlinks). A generator with a fixed
+source and a date is auditable; a list typed from memory is not.
+
+Widening a vocabulary is additive in the only sense that matters: the wire and the database carry the
+code, so stored rows stay valid. The language list therefore needed no migration.
+
+**Consequences.** Native names are not translated — the interface language never changes «中文», and
+that is the spelling a person looking for their own language recognises. Countries are a **closed
+vocabulary**, not free text like a city: «Германия» and «Deutschland» must compare equal, and no
+normalisation can promise that. So the country code, not the typed name, will be what the profile
+stores and the filter compares; the server validates it against the same list. Until that wiring
+lands (next change), the generated country file is data with no reader.
+
+**Rejected.** A hand-written "major languages" list (wrong today for anyone whose language was
+forgotten, wrong again within a year); a free-text country field (D27's place model works for cities
+because both people can spell them, not for countries with several native names); fetching CLDR at
+build (a build that needs the network fails offline); `countries-list` or `country-state-city` as a
+dependency (a dependency for data we can generate once, and the second one drags in every city on
+earth).

@@ -14,7 +14,6 @@ import {
   type ArchivedChatSummaryView,
   type ArchivedChatView,
   type Gender,
-  type Language,
   type MediaKind,
   type OwnerMessageListResponse,
   type OwnerMessageView,
@@ -39,7 +38,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { describeError } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
-import { OWNER_TOPIC_LABELS } from '@/lib/labels';
+import { LANGUAGE_LABELS, OWNER_TOPIC_LABELS } from '@/lib/labels';
 
 /**
  * The owner's archive page.
@@ -66,19 +65,6 @@ import { OWNER_TOPIC_LABELS } from '@/lib/labels';
 const GENDER_LABELS: Record<Gender, string> = {
   female: 'Женщина',
   male: 'Мужчина',
-};
-
-const LANGUAGE_LABELS: Record<Language, string> = {
-  ru: 'Русский',
-  en: 'Английский',
-  uk: 'Украинский',
-  kk: 'Казахский',
-  de: 'Немецкий',
-  fr: 'Французский',
-  es: 'Испанский',
-  tr: 'Турецкий',
-  zh: 'Китайский',
-  ar: 'Арабский',
 };
 
 const MEDIA_LABELS: Record<MediaKind, string> = {

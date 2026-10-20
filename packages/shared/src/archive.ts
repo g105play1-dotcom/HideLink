@@ -22,9 +22,9 @@
 import { z } from 'zod';
 
 import { PUBLIC_ID_PATTERN } from './ids.js';
+import { LANGUAGES } from './languages.js';
 import {
   GENDERS,
-  LANGUAGES,
   PROFILE_LIMITS,
   ageFromBirthYear,
   genderSchema,

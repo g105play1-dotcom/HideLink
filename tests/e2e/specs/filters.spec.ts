@@ -244,4 +244,34 @@ test.describe('filtered search', () => {
 
     expectNoClientErrors(alice);
   });
+
+  test('a declared gender is withdrawn by pressing it again, and the withdrawal survives a reload', async ({
+    browser,
+  }) => {
+    const alice = await newIdentity(browser);
+    await openSettings(alice.page);
+
+    const group = alice.page.getByRole('group', { name: 'Ваш пол', exact: true });
+    const female = group.getByRole('button', { name: 'Женский', exact: true });
+
+    // Two buttons and no «Не указывать» (the owner's rule, 2026-10-20): the pressed one is
+    // the only way back to "not stated", so pressing it again must really clear it.
+    await female.click();
+    await expect(female).toHaveAttribute('aria-pressed', 'true');
+    await saveProfile(alice.page);
+
+    await alice.page.reload();
+    await openSettings(alice.page);
+    await expect(female).toHaveAttribute('aria-pressed', 'true');
+
+    await female.click();
+    await expect(female).toHaveAttribute('aria-pressed', 'false');
+    await saveProfile(alice.page);
+
+    await alice.page.reload();
+    await openSettings(alice.page);
+    await expect(female).toHaveAttribute('aria-pressed', 'false');
+
+    expectNoClientErrors(alice);
+  });
 });

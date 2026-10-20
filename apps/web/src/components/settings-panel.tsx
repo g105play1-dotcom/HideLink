@@ -125,7 +125,7 @@ function MultiChoice<T extends string>({
   );
 }
 
-/** One choice out of a vocabulary, optionally including "not stated" (`null`). */
+/** One choice out of a vocabulary, with no value selected meaning "not stated". */
 function SingleChoice<T extends string>({
   legend,
   options,
@@ -135,10 +135,10 @@ function SingleChoice<T extends string>({
   disabled,
 }: {
   legend: string;
-  options: readonly (T | null)[];
+  options: readonly T[];
   value: T | null;
   onChange: (value: T | null) => void;
-  labelFor: (value: T | null) => string;
+  labelFor: (value: T) => string;
   disabled?: boolean;
 }) {
   return (
@@ -147,7 +147,7 @@ function SingleChoice<T extends string>({
       <div className="flex flex-wrap gap-2">
         {options.map((option) => (
           <button
-            key={option ?? 'unstated'}
+            key={option}
             type="button"
             aria-pressed={value === option}
             onClick={() => onChange(option)}
@@ -167,8 +167,10 @@ function SingleChoice<T extends string>({
  * The languages are *not* free text: they are compared for equality between two people,
  * so "русский", "russian" and "ru" have to be one value, and the server validates against
  * the shared list. The owner asked for a dropdown rather than a row of chips
- * (docs/DECISIONS.md D22) because ten languages as buttons dominate the column; a native
- * `<select>` keeps every value discoverable and costs one line.
+ * (docs/DECISIONS.md D22) because as buttons even ten languages dominate the column; a
+ * native `<select>` keeps every value discoverable and costs one line. The vocabulary has
+ * since grown to every major language (D30), each named in its own language, which is
+ * exactly the case a native select handles without a popover to build and maintain.
  */
 function LanguagePicker({
   legend,
@@ -477,10 +479,15 @@ function ProfileSection({ session }: { session: SessionInfo }) {
 
       <SingleChoice
         legend="Ваш пол"
-        options={[null, ...GENDERS]}
+        options={GENDERS}
         value={gender}
-        onChange={setGender}
-        labelFor={(value) => (value === null ? 'Не указывать' : GENDER_LABELS[value])}
+        // Clicking the chosen value again withdraws it (the owner's rule, 2026-10-20):
+        // with two buttons and no «Не указывать», that is the one way back to "not
+        // stated", and withdrawing declared data must stay possible. `aria-pressed` is
+        // what communicates the state, so the button that is no longer chosen simply
+        // stops being pressed.
+        onChange={(value) => setGender(gender === value ? null : value)}
+        labelFor={(value) => GENDER_LABELS[value]}
         disabled={save.isPending}
       />
 

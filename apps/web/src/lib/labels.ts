@@ -1,4 +1,6 @@
 import {
+  LANGUAGE_NAMES,
+  LANGUAGES,
   ageFromBirthYear,
   type DeclaredProfile,
   type Gender,
@@ -9,12 +11,12 @@ import {
 } from '@anonlink/shared';
 
 /**
- * Russian names for the shared vocabularies.
+ * Display names for the shared vocabularies.
  *
  * The wire protocol and the database use stable identifiers (`female`, `ru`, `city`), and
- * those identifiers must never reach the screen: `Record<Gender, string>` makes the
- * mapping exhaustive at compile time, so adding a language to the shared list is a type
- * error here until it has a name a user can read.
+ * those identifiers must never reach the screen: `Record<Gender, string>` makes the gender
+ * mapping exhaustive at compile time, so adding a gender to the shared list is a type error
+ * here until it has a name a user can read.
  */
 
 export const GENDER_LABELS: Record<Gender, string> = {
@@ -22,18 +24,17 @@ export const GENDER_LABELS: Record<Gender, string> = {
   male: 'Мужской',
 };
 
-export const LANGUAGE_LABELS: Record<Language, string> = {
-  ru: 'Русский',
-  en: 'Английский',
-  uk: 'Украинский',
-  kk: 'Казахский',
-  de: 'Немецкий',
-  fr: 'Французский',
-  es: 'Испанский',
-  tr: 'Турецкий',
-  zh: 'Китайский',
-  ar: 'Арабский',
-};
+/**
+ * Display names for the shared vocabularies.
+ *
+ * Genders are interface words and will be translated with the interface. Languages are
+ * **not** translated: each is shown in its own language — «Русский», "English", «中文» —
+ * as the owner asked. That is also the one spelling that does not depend on the interface
+ * language, and it is what a person looking for their own language recognises fastest.
+ */
+export const LANGUAGE_LABELS: Record<Language, string> = Object.fromEntries(
+  LANGUAGES.map((language) => [language, LANGUAGE_NAMES[language].native]),
+) as Record<Language, string>;
 
 /**
  * The place filters, as the user reads them.
