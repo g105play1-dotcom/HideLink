@@ -1,6 +1,8 @@
 import { ErrorCode } from '@anonlink/shared';
 
-import { API_BASE, API_UNREACHABLE_HINT } from './config';
+import { activeT } from '@/i18n';
+
+import { API_BASE } from './config';
 
 /**
  * A failed API call.
@@ -78,7 +80,11 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     const aborted = error instanceof Error && error.name === 'AbortError';
     throw new ApiError(
       ErrorCode.DATABASE_UNAVAILABLE,
-      aborted ? 'Превышено время ожидания ответа сервера.' : API_UNREACHABLE_HINT,
+      aborted
+        ? activeT('Превышено время ожидания ответа сервера.')
+        : activeT(
+            'Не удаётся связаться с сервером. Проверьте, что API запущен, и попробуйте снова.',
+          ),
       0,
     );
   } finally {

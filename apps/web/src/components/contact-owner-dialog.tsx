@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/i18n';
 import { describeError } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
 import { OWNER_TOPIC_LABELS } from '@/lib/labels';
@@ -37,6 +38,7 @@ import { useAppStore } from '@/store/app-store';
  * service into one that collects contact details.
  */
 export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { locale, t } = useI18n();
   const notify = useAppStore((state) => state.notify);
 
   const [topic, setTopic] = useState<OwnerMessageTopic>('suggestion');
@@ -63,10 +65,10 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
       setText('');
       setContact('');
       onClose();
-      notify('success', 'Сообщение отправлено администрации.');
+      notify('success', t('Сообщение отправлено администрации.'));
     } catch (error) {
       // The text is kept on purpose: a failed send must not cost the user what they wrote.
-      notify('error', describeError(error));
+      notify('error', describeError(error, locale));
     } finally {
       setBusy(false);
     }
@@ -75,13 +77,13 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
   return (
     <Dialog
       open={open}
-      title="Связаться с администрацией"
-      description="Выберите тему, чтобы сообщение попало по адресу."
+      title={t('Связаться с администрацией')}
+      description={t('Выберите тему, чтобы сообщение попало по адресу.')}
       onClose={busy ? undefined : onClose}
     >
       <div className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-sm font-medium">Тема обращения</legend>
+          <legend className="mb-1 text-sm font-medium">{t('Тема обращения')}</legend>
 
           {OWNER_MESSAGE_TOPICS.map((value) => (
             <label
@@ -99,14 +101,14 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
                 onChange={() => setTopic(value)}
                 className="accent-(--primary)"
               />
-              {OWNER_TOPIC_LABELS[value]}
+              {t(OWNER_TOPIC_LABELS[value])}
             </label>
           ))}
         </fieldset>
 
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium" htmlFor="owner-message-text">
-            Текст сообщения
+            {t('Текст сообщения')}
           </label>
           <Textarea
             id="owner-message-text"
@@ -114,7 +116,7 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
             onChange={(event) => setText(event.target.value)}
             rows={4}
             maxLength={OWNER_MESSAGE_MAX_LENGTH}
-            placeholder="Опишите подробнее, чем помочь."
+            placeholder={t('Опишите подробнее, чем помочь.')}
           />
           <p className="text-right text-xs text-muted-foreground">
             {text.length} / {OWNER_MESSAGE_MAX_LENGTH}
@@ -123,27 +125,28 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
 
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium" htmlFor="owner-message-contact">
-            Как с вами связаться{' '}
-            <span className="font-normal text-muted-foreground">(необязательно)</span>
+            {t('Как с вами связаться')}{' '}
+            <span className="font-normal text-muted-foreground">{t('(необязательно)')}</span>
           </label>
           <Input
             id="owner-message-contact"
             value={contact}
             onChange={(event) => setContact(event.target.value)}
             maxLength={OWNER_CONTACT_MAX_LENGTH}
-            placeholder="Ссылка, ник или адрес — если хотите ответ"
+            placeholder={t('Ссылка, ник или адрес — если хотите ответ')}
             autoComplete="off"
           />
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Сообщение сохраняется, чтобы администрация могла его прочитать и ответить, и удаляется
-          автоматически по истечении срока хранения. Ваш User ID видит только администрация.
+          {t(
+            'Сообщение сохраняется, чтобы администрация могла его прочитать и ответить, и удаляется автоматически по истечении срока хранения. Ваш User ID видит только администрация.',
+          )}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Отмена
+            {t('Отмена')}
           </Button>
           <Button onClick={() => void submit()} disabled={!canSend}>
             {busy ? (
@@ -151,7 +154,7 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
             ) : (
               <Send className="size-4" aria-hidden="true" />
             )}
-            Отправить администрации
+            {t('Отправить администрации')}
           </Button>
         </div>
       </div>

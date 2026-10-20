@@ -12,7 +12,3 @@ export const API_ORIGIN = rawApiUrl.replace(/\/+$/, '');
 
 /** Base path of the REST API. */
 export const API_BASE = `${API_ORIGIN}/api/v1`;
-
-/** Human-readable explanation shown when the browser cannot reach the API at all. */
-export const API_UNREACHABLE_HINT =
-  'Не удаётся связаться с сервером. Проверьте, что API запущен, и попробуйте снова.';

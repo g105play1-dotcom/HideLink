@@ -21,6 +21,7 @@ import {
 import { io, type Socket } from 'socket.io-client';
 
 import { API_ORIGIN } from './config';
+import { activeT, getActiveLocale } from '@/i18n';
 import { describeError, describeMatchCancel, describeRequestStatus } from './error-text';
 import { ApiError, apiRequest } from './http';
 import { describeDroppedCriteria } from './labels';
@@ -172,7 +173,7 @@ class AnonymousClient {
       // after the new cookie is in place, so the handshake cannot race the response.
       this.openSocket();
 
-      store.notify('success', 'Вы получили новый User ID. Прошлый больше не действует.');
+      store.notify('success', activeT('Вы получили новый User ID. Прошлый больше не действует.'));
       return { ok: true };
     } catch (error) {
       this.rotating = false;
@@ -222,7 +223,7 @@ class AnonymousClient {
       if (result.ok) {
         current.confirmMessage(clientMessageId, result.data.messageId, result.data.sentAt);
       } else {
-        current.failMessage(clientMessageId, describeError(result.error));
+        current.failMessage(clientMessageId, describeError(result.error, getActiveLocale()));
       }
     });
   }
@@ -274,7 +275,7 @@ class AnonymousClient {
   async reportCurrentChat(reason: ReportReason, details?: string): Promise<CommandOutcome> {
     const state = useAppStore.getState();
     const chatId = state.chat?.chatId;
-    if (!chatId) return this.failWith('Чат не найден.');
+    if (!chatId) return this.failWith(activeT('Чат не найден.'));
 
     // The dialog promises that the last message is kept as evidence, and the server only
     // snapshots a message it is *told* about, from its own in-memory copy. Without this id
@@ -296,7 +297,7 @@ class AnonymousClient {
   /** Blocks the peer of the current chat. Blocking also ends it, server-side. */
   async blockCurrentPeer(): Promise<CommandOutcome> {
     const chatId = useAppStore.getState().chat?.chatId;
-    if (!chatId) return this.failWith('Чат не найден.');
+    if (!chatId) return this.failWith(activeT('Чат не найден.'));
 
     const result = await this.command<BlockPeerResult>('block:peer', { chatId });
     return result.ok ? { ok: true } : this.failed(result.error);
@@ -366,7 +367,7 @@ class AnonymousClient {
         if (this.serverCloseRetries >= MAX_SERVER_CLOSE_RETRIES) {
           useAppStore
             .getState()
-            .setConnection('offline', 'Сервер закрыл соединение. Нажмите «Повторить».');
+            .setConnection('offline', activeT('Сервер закрыл соединение. Нажмите «Повторить».'));
           return;
         }
 
@@ -376,17 +377,24 @@ class AnonymousClient {
       }
 
       // Socket.IO reconnects on its own for transport-level failures.
-      useAppStore.getState().setConnection('reconnecting', 'Соединение потеряно. Восстанавливаем…');
+      useAppStore
+        .getState()
+        .setConnection('reconnecting', activeT('Соединение потеряно. Восстанавливаем…'));
     });
 
     socket.on('connect_error', () => {
-      useAppStore.getState().setConnection('reconnecting', 'Не удаётся подключиться. Повторяем…');
+      useAppStore
+        .getState()
+        .setConnection('reconnecting', activeT('Не удаётся подключиться. Повторяем…'));
     });
 
     socket.io.on('reconnect_failed', () => {
       useAppStore
         .getState()
-        .setConnection('offline', 'Не удалось восстановить соединение. Нажмите «Повторить».');
+        .setConnection(
+          'offline',
+          activeT('Не удалось восстановить соединение. Нажмите «Повторить».'),
+        );
     });
 
     socket.on('session:ready', (payload) => this.onSessionReady(payload));
@@ -405,14 +413,21 @@ class AnonymousClient {
       store.noteRelaxation(payload.dropped, payload.criteria);
       // Said out loud, every time. A silently widened search would hand the user exactly
       // the partner they had filtered out, which is worse than never matching at all.
-      store.notify('info', `Ищем шире: ${describeDroppedCriteria(payload.dropped)}.`);
+      store.notify(
+        'info',
+        activeT('Ищем шире: {criteria}.', {
+          criteria: describeDroppedCriteria(payload.dropped, getActiveLocale()),
+        }),
+      );
     });
 
     socket.on('match:cancelled', (payload) => {
       useAppStore.getState().stopSearching();
       // `chat_started` is not worth a toast: the chat screen is already opening.
       if (payload.reason !== 'chat_started') {
-        useAppStore.getState().notify('info', describeMatchCancel(payload.reason));
+        useAppStore
+          .getState()
+          .notify('info', describeMatchCancel(payload.reason, getActiveLocale()));
       }
     });
 
@@ -442,7 +457,9 @@ class AnonymousClient {
 
     socket.on('request:incoming', (payload) => {
       useAppStore.getState().addIncomingRequest(payload);
-      useAppStore.getState().notify('info', `${payload.from.alias} хочет начать чат.`);
+      useAppStore
+        .getState()
+        .notify('info', activeT('{alias} хочет начать чат.', { alias: payload.from.alias }));
     });
 
     socket.on('request:resolved', (payload) => {
@@ -458,12 +475,12 @@ class AnonymousClient {
       }
 
       if (payload.status !== 'accepted') {
-        store.notify('info', describeRequestStatus(payload.status));
+        store.notify('info', describeRequestStatus(payload.status, getActiveLocale()));
       }
     });
 
     socket.on('peer:blocked', () => {
-      useAppStore.getState().notify('success', 'Пользователь заблокирован.');
+      useAppStore.getState().notify('success', activeT('Пользователь заблокирован.'));
     });
 
     socket.on('app:error', (payload) => this.onServerError(payload));
@@ -488,7 +505,7 @@ class AnonymousClient {
 
     if (payload.protocolVersion !== PROTOCOL_VERSION) {
       store.setProtocolMismatch(true);
-      store.notify('error', 'Версия приложения устарела. Обновите страницу (Ctrl+F5).');
+      store.notify('error', activeT('Версия приложения устарела. Обновите страницу (Ctrl+F5).'));
     }
 
     // `chat:resumed` normally arrives first with the transcript. This is the fallback
@@ -516,7 +533,7 @@ class AnonymousClient {
       store.clearConversation();
       store.notify(
         'error',
-        'Соединение с сервером прервалось, чат закрыт. Найдите собеседника заново.',
+        activeT('Соединение с сервером прервалось, чат закрыт. Найдите собеседника заново.'),
       );
     }
 
@@ -539,7 +556,7 @@ class AnonymousClient {
       case ErrorCode.FORBIDDEN_ORIGIN:
       case ErrorCode.TOO_MANY_CONNECTIONS:
         this.refused = true;
-        store.setConnection('rejected', describeError(payload));
+        store.setConnection('rejected', describeError(payload, getActiveLocale()));
         return;
 
       case ErrorCode.IDENTITY_REQUIRED:
@@ -548,12 +565,12 @@ class AnonymousClient {
         this.refused = true;
         store.setConnection(
           'offline',
-          'Анонимная сессия не найдена. Нажмите «Повторить», чтобы начать заново.',
+          activeT('Анонимная сессия не найдена. Нажмите «Повторить», чтобы начать заново.'),
         );
         return;
 
       default:
-        store.notify('error', describeError(payload));
+        store.notify('error', describeError(payload, getActiveLocale()));
     }
   }
 
@@ -574,7 +591,7 @@ class AnonymousClient {
         ok: false,
         error: {
           code: ErrorCode.DATABASE_UNAVAILABLE,
-          message: 'Нет соединения с сервером.',
+          message: activeT('Нет соединения с сервером.'),
         },
       });
     }
@@ -597,7 +614,7 @@ class AnonymousClient {
           ok: false,
           error: {
             code: ErrorCode.DATABASE_UNAVAILABLE,
-            message: 'Сервер не ответил. Попробуйте ещё раз.',
+            message: activeT('Сервер не ответил. Попробуйте ещё раз.'),
           },
         });
       }, COMMAND_TIMEOUT_MS);
@@ -613,7 +630,7 @@ class AnonymousClient {
   }
 
   private failed(error: ErrorPayload): CommandOutcome {
-    return this.failWith(describeError(error));
+    return this.failWith(describeError(error, getActiveLocale()));
   }
 
   private failWith(message: string): CommandOutcome {
@@ -646,9 +663,9 @@ class AnonymousClient {
 
 /** Best-effort user-facing text for anything thrown outside a socket command. */
 function describeThrown(error: unknown): string {
-  if (error instanceof ApiError) return describeError(error);
+  if (error instanceof ApiError) return describeError(error, getActiveLocale());
   if (error instanceof Error && error.message) return error.message;
-  return 'Что-то пошло не так. Попробуйте ещё раз.';
+  return activeT('Что-то пошло не так. Попробуйте ещё раз.');
 }
 
 export const client = new AnonymousClient();

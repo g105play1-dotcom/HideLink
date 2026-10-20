@@ -11,6 +11,7 @@ import { ContactOwnerDialog } from '@/components/contact-owner-dialog';
 import { DirectSearch } from '@/components/direct-search';
 import { IdentityStrip } from '@/components/identity-strip';
 import { IncomingRequestDialog } from '@/components/incoming-request-dialog';
+import { LanguageToggle } from '@/components/language-toggle';
 import { ReportDialog } from '@/components/report-dialog';
 import { SearchPanel } from '@/components/search-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -18,6 +19,7 @@ import { Toaster } from '@/components/toaster';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { useAppStore } from '@/store/app-store';
 
@@ -34,6 +36,7 @@ import { useAppStore } from '@/store/app-store';
  * combination (searching *and* chatting) cannot be represented.
  */
 export function HomeScreen() {
+  const { t } = useI18n();
   const connection = useAppStore((state) => state.connection);
   const connectionDetail = useAppStore((state) => state.connectionDetail);
   const bootError = useAppStore((state) => state.bootError);
@@ -84,6 +87,7 @@ export function HomeScreen() {
 
           <div className="flex items-center gap-2">
             <ConnectionBadge />
+            <LanguageToggle />
             <ThemeToggle />
           </div>
         </header>
@@ -96,8 +100,9 @@ export function HomeScreen() {
                 aria-hidden="true"
               />
               <p className="text-sm" role="alert">
-                Сервер работает по другой версии протокола. Обновите страницу — иначе сообщения
-                могут теряться.
+                {t(
+                  'Сервер работает по другой версии протокола. Обновите страницу — иначе сообщения могут теряться.',
+                )}
               </p>
             </CardContent>
           </Card>
@@ -106,8 +111,8 @@ export function HomeScreen() {
         <main id="main" className="flex min-h-0 flex-1 flex-col gap-3">
           {!reachable && !session ? (
             <UnavailableState
-              title={connection === 'rejected' ? 'Доступ закрыт' : 'Нет связи с сервером'}
-              detail={connectionDetail ?? bootError ?? 'Не удалось получить анонимную сессию.'}
+              title={t(connection === 'rejected' ? 'Доступ закрыт' : 'Нет связи с сервером')}
+              detail={connectionDetail ?? bootError ?? t('Не удалось получить анонимную сессию.')}
               onRetry={() => void retry()}
               retrying={retrying}
             />
@@ -144,14 +149,14 @@ export function HomeScreen() {
           annoyed with the service should not have to open their own profile to say so.
         */}
         <footer className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-muted-foreground">
-          <span>Анонимный чат с незнакомцами</span>
+          <span>{t('Анонимный чат с незнакомцами')}</span>
           <button
             type="button"
             onClick={() => setContacting(true)}
             className="inline-flex items-center gap-1.5 font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
           >
             <Mail className="size-3.5" aria-hidden="true" />
-            Связаться с администрацией
+            {t('Связаться с администрацией')}
           </button>
         </footer>
       </div>
@@ -187,6 +192,8 @@ function UnavailableState({
   onRetry: () => void;
   retrying: boolean;
 }) {
+  const { t } = useI18n();
+
   return (
     <Card className="flex flex-1 flex-col justify-center">
       <CardHeader>
@@ -203,12 +210,13 @@ function UnavailableState({
           ) : (
             <RefreshCw className="size-4" aria-hidden="true" />
           )}
-          Повторить
+          {t('Повторить')}
         </Button>
 
         <p className="text-xs text-muted-foreground">
-          Если не помогает: проверьте, что API-сервер запущен, и что браузер не блокирует cookie для
-          этого сайта — без cookie анонимная сессия невозможна.
+          {t(
+            'Если не помогает: проверьте, что API-сервер запущен, и что браузер не блокирует cookie для этого сайта — без cookie анонимная сессия невозможна.',
+          )}
         </p>
       </CardContent>
     </Card>
@@ -216,8 +224,10 @@ function UnavailableState({
 }
 
 function IdentitySkeleton() {
+  const { t } = useI18n();
+
   return (
-    <div className="flex flex-col gap-1" aria-busy="true" aria-label="Получаем ваш User ID">
+    <div className="flex flex-col gap-1" aria-busy="true" aria-label={t('Получаем ваш User ID')}>
       <Skeleton className="h-3 w-24" />
       <Skeleton className="h-7 w-44" />
     </div>

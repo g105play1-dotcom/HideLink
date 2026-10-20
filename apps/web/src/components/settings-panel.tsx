@@ -35,6 +35,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CITY_SUGGESTIONS, REGION_SUGGESTIONS } from '@/data/places';
+import { useI18n } from '@/i18n';
+import type { MessageKey } from '@/i18n/messages';
 import { client } from '@/lib/anonymous-client';
 import { describeError } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
@@ -183,6 +185,7 @@ function LanguagePicker({
   onToggle: (value: Language) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const available = LANGUAGES.filter((language) => !selected.includes(language));
 
   return (
@@ -196,7 +199,7 @@ function LanguagePicker({
               <button
                 type="button"
                 onClick={() => onToggle(language)}
-                aria-label={`Убрать ${LANGUAGE_LABELS[language]}`}
+                aria-label={t('Убрать {value}', { value: LANGUAGE_LABELS[language] })}
                 className={cn(chipClass(true), 'flex items-center gap-1.5')}
               >
                 {LANGUAGE_LABELS[language]}
@@ -206,15 +209,15 @@ function LanguagePicker({
           ))}
         </ul>
       ) : (
-        <p className="text-xs text-muted-foreground">Не выбрано ни одного.</p>
+        <p className="text-xs text-muted-foreground">{t('Не выбрано ни одного.')}</p>
       )}
 
       <label className="sr-only" htmlFor={`${legend}-add`}>
-        Добавить язык
+        {t('Добавить язык')}
       </label>
       <select
         id={`${legend}-add`}
-        aria-label="Добавить язык"
+        aria-label={t('Добавить язык')}
         className="h-9 w-full rounded-lg border border-input bg-card px-2 text-sm text-foreground disabled:opacity-50"
         value=""
         disabled={disabled || available.length === 0}
@@ -223,7 +226,7 @@ function LanguagePicker({
           if (next) onToggle(next as Language);
         }}
       >
-        <option value="">Добавить язык…</option>
+        <option value="">{t('Добавить язык…')}</option>
         {available.map((language) => (
           <option key={language} value={language}>
             {LANGUAGE_LABELS[language]}
@@ -293,6 +296,7 @@ function PlacePicker({
   onRemove: (value: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useI18n();
   const full = values.length >= PROFILE_LIMITS.PLACE_FILTER_MAX;
 
   return (
@@ -331,7 +335,7 @@ function PlacePicker({
           onClick={onAdd}
           disabled={disabled || full || draft.trim().length === 0}
         >
-          Добавить
+          {t('Добавить')}
         </Button>
       </div>
 
@@ -342,7 +346,7 @@ function PlacePicker({
               <button
                 type="button"
                 onClick={() => onRemove(value)}
-                aria-label={`Убрать ${value}`}
+                aria-label={t('Убрать {value}', { value })}
                 className={cn(chipClass(true), 'flex items-center gap-1.5')}
               >
                 {value}
@@ -357,7 +361,9 @@ function PlacePicker({
 
       {full ? (
         <p className="text-xs text-muted-foreground">
-          Не больше {PROFILE_LIMITS.PLACE_FILTER_MAX} названий в одном списке.
+          {t('Не больше {count} названий в одном списке.', {
+            count: PROFILE_LIMITS.PLACE_FILTER_MAX,
+          })}
         </p>
       ) : null}
     </fieldset>
@@ -378,13 +384,16 @@ function boundValue(value: number | null): string {
   return value === null ? '' : String(value);
 }
 
-function firstProblem(result: { error: { issues: Array<{ message: string }> } }): string {
+function firstProblem(
+  result: { error: { issues: Array<{ message: string }> } },
+  t: (key: MessageKey) => string,
+): string {
   // The only cross-field rule the filters have, and the one a user can actually hit.
   if (result.error.issues.some((issue) => issue.message === 'AGE_RANGE_INVERTED')) {
-    return 'Нижняя граница возраста больше верхней — так не найдётся никто.';
+    return t('Нижняя граница возраста больше верхней — так не найдётся никто.');
   }
 
-  return 'Проверьте значения: сервер отклонит такие данные.';
+  return t('Проверьте значения: сервер отклонит такие данные.');
 }
 
 export function SettingsPanel({ session }: { session: SessionInfo }) {
@@ -408,6 +417,7 @@ export function SettingsPanel({ session }: { session: SessionInfo }) {
 // -----------------------------------------------------------------------------
 
 function ProfileSection({ session }: { session: SessionInfo }) {
+  const { locale, t } = useI18n();
   const [gender, setGender] = useState<Gender | null>(session.profile.gender);
   /**
    * The field the user sees is an *age*; the column is a year of birth.
@@ -428,7 +438,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
       apiRequest<SessionView>('/me/settings', { method: 'PATCH', json: { profile } }),
     onSuccess: (updated) => {
       client.applySession(updated);
-      useAppStore.getState().notify('success', 'Данные о себе сохранены.');
+      useAppStore.getState().notify('success', t('Данные о себе сохранены.'));
     },
   });
 
@@ -458,9 +468,9 @@ function ProfileSection({ session }: { session: SessionInfo }) {
    * boolean expression without a cast, and a cast would hide a real mistake later.
    */
   const problem = !ageIsSane
-    ? `Возраст указывается целым числом от 1 до ${PROFILE_LIMITS.AGE_MAX}.`
+    ? t('Возраст указывается целым числом от 1 до {max}.', { max: PROFILE_LIMITS.AGE_MAX })
     : !draft.success
-      ? firstProblem(draft)
+      ? firstProblem(draft, t)
       : null;
 
   function toggle<T>(list: readonly T[], value: T): T[] {
@@ -470,15 +480,17 @@ function ProfileSection({ session }: { session: SessionInfo }) {
   return (
     <section className={SECTION} aria-labelledby="settings-about">
       <h3 id="settings-about" className="flex items-center gap-2 text-sm font-semibold">
-        <UserRound className="size-4 text-primary" aria-hidden="true" />О вас
+        <UserRound className="size-4 text-primary" aria-hidden="true" />
+        {t('О вас')}
       </h3>
       <p className="text-xs text-muted-foreground">
-        Эти данные указываете вы сами, проверить их нечем. Они нужны только подбору — собеседник их
-        не видит.
+        {t(
+          'Эти данные указываете вы сами, проверить их нечем. Они нужны только подбору — собеседник их не видит.',
+        )}
       </p>
 
       <SingleChoice
-        legend="Ваш пол"
+        legend={t('Ваш пол')}
         options={GENDERS}
         value={gender}
         // Clicking the chosen value again withdraws it (the owner's rule, 2026-10-20):
@@ -487,18 +499,18 @@ function ProfileSection({ session }: { session: SessionInfo }) {
         // what communicates the state, so the button that is no longer chosen simply
         // stops being pressed.
         onChange={(value) => setGender(gender === value ? null : value)}
-        labelFor={(value) => GENDER_LABELS[value]}
+        labelFor={(value) => t(GENDER_LABELS[value])}
         disabled={save.isPending}
       />
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium" htmlFor="profile-age">
-          Возраст
+          {t('Возраст')}
         </label>
         <Input
           id="profile-age"
           inputMode="numeric"
-          placeholder="Например, 25"
+          placeholder={t('Например, 25')}
           value={age}
           onChange={(event) => setAge(event.target.value)}
           disabled={save.isPending}
@@ -510,28 +522,28 @@ function ProfileSection({ session }: { session: SessionInfo }) {
       <div className="grid gap-3 sm:grid-cols-2">
         <Combobox
           id="profile-city"
-          label="Город"
+          label={t('Город')}
           value={city}
           onChange={setCity}
           options={CITY_SUGGESTIONS}
-          placeholder="Начните вводить"
+          placeholder={t('Начните вводить')}
           maxLength={PROFILE_LIMITS.PLACE_MAX_LENGTH}
           disabled={save.isPending}
         />
         <Combobox
           id="profile-region"
-          label="Регион"
+          label={t('Регион')}
           value={region}
           onChange={setRegion}
           options={REGION_SUGGESTIONS}
-          placeholder="Начните вводить"
+          placeholder={t('Начните вводить')}
           maxLength={PROFILE_LIMITS.PLACE_MAX_LENGTH}
           disabled={save.isPending}
         />
       </div>
 
       <LanguagePicker
-        legend="Языки, на которых вам удобно общаться"
+        legend={t('Языки, на которых вам удобно общаться')}
         selected={languages}
         onToggle={(value) => setLanguages((current) => toggle(current, value))}
         disabled={save.isPending}
@@ -546,7 +558,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
 
       {save.isError ? (
         <p className="text-sm text-destructive" role="alert">
-          {describeError(save.error)}
+          {describeError(save.error, locale)}
         </p>
       ) : null}
 
@@ -562,7 +574,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
           ) : (
             <Save className="size-4" aria-hidden="true" />
           )}
-          Сохранить данные
+          {t('Сохранить данные')}
         </Button>
       </div>
     </section>
@@ -574,6 +586,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
 // -----------------------------------------------------------------------------
 
 function FiltersSection({ session }: { session: SessionInfo }) {
+  const { locale, t } = useI18n();
   const [genders, setGenders] = useState<Gender[]>([...session.search.genders]);
   const [ageMin, setAgeMin] = useState(boundValue(session.search.ageMin));
   const [ageMax, setAgeMax] = useState(boundValue(session.search.ageMax));
@@ -596,7 +609,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
       setRegions([...variables.regions]);
       setCityDraft('');
       setRegionDraft('');
-      useAppStore.getState().notify('success', 'Фильтры поиска сохранены.');
+      useAppStore.getState().notify('success', t('Фильтры поиска сохранены.'));
     },
   });
 
@@ -610,7 +623,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
     relaxAllowed,
   });
 
-  const preview = draft.success ? describeCriteria(draft.data) : [];
+  const preview = draft.success ? describeCriteria(draft.data, locale) : [];
   const anywhere = cities.length === 0 && regions.length === 0;
 
   function toggle<T>(list: readonly T[], value: T): T[] {
@@ -621,15 +634,16 @@ function FiltersSection({ session }: { session: SessionInfo }) {
     <section className={SECTION} aria-labelledby="settings-wanted">
       <h3 id="settings-wanted" className="flex items-center gap-2 text-sm font-semibold">
         <SlidersHorizontal className="size-4 text-primary" aria-hidden="true" />
-        Кого искать
+        {t('Кого искать')}
       </h3>
       <p className="text-xs text-muted-foreground">
-        Подбор идёт только между теми, кто подходит друг другу: ваши фильтры и фильтры собеседника
-        действуют одновременно.
+        {t(
+          'Подбор идёт только между теми, кто подходит друг другу: ваши фильтры и фильтры собеседника действуют одновременно.',
+        )}
       </p>
 
       <MultiChoice
-        legend="Пол собеседника"
+        legend={t('Пол собеседника')}
         // «Любой» is the first chip rather than an empty row: see `ANY`.
         options={[ANY, ...GENDERS]}
         selected={genders.length === 0 ? [ANY] : genders}
@@ -637,27 +651,27 @@ function FiltersSection({ session }: { session: SessionInfo }) {
           if (value === ANY) setGenders([]);
           else setGenders((current) => toggle(current, value));
         }}
-        labelFor={(value) => (value === ANY ? 'Любой' : GENDER_LABELS[value])}
+        labelFor={(value) => (value === ANY ? t('Любой') : t(GENDER_LABELS[value]))}
         disabled={save.isPending}
       />
 
       <fieldset className="flex flex-col gap-1.5" disabled={save.isPending}>
-        <legend className="text-sm font-medium">Возраст собеседника</legend>
+        <legend className="text-sm font-medium">{t('Возраст собеседника')}</legend>
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            aria-label="Минимальный возраст"
+            aria-label={t('Минимальный возраст')}
             className="w-24"
             inputMode="numeric"
-            placeholder="от"
+            placeholder={t('от')}
             value={ageMin}
             onChange={(event) => setAgeMin(event.target.value)}
           />
           <span className="text-sm text-muted-foreground">—</span>
           <Input
-            aria-label="Максимальный возраст"
+            aria-label={t('Максимальный возраст')}
             className="w-24"
             inputMode="numeric"
-            placeholder="до"
+            placeholder={t('до')}
             value={ageMax}
             onChange={(event) => setAgeMax(event.target.value)}
           />
@@ -665,7 +679,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
       </fieldset>
 
       <fieldset className="flex flex-col gap-2" disabled={save.isPending}>
-        <legend className="text-sm font-medium">Где искать</legend>
+        <legend className="text-sm font-medium">{t('Где искать')}</legend>
 
         {/*
           The neutral chip, the same one every other row has: «Любой» is the empty pair of
@@ -683,22 +697,22 @@ function FiltersSection({ session }: { session: SessionInfo }) {
             }}
             className={chipClass(anywhere)}
           >
-            Любой
+            {t('Любой')}
           </button>
           <span className="text-xs text-muted-foreground">
-            {anywhere ? 'Подойдёт любой город и регион.' : 'Подойдёт любой из перечисленных.'}
+            {anywhere ? t('Подойдёт любой город и регион.') : t('Подойдёт любой из перечисленных.')}
           </span>
         </div>
 
         <PlacePicker
           id="filter-cities"
-          legend="Города"
+          legend={t('Города')}
           values={cities}
           draft={cityDraft}
           options={CITY_SUGGESTIONS}
-          addLabel="Добавить город"
-          placeholder="Начните вводить название"
-          emptyHint="Не выбран ни один город."
+          addLabel={t('Добавить город')}
+          placeholder={t('Начните вводить название')}
+          emptyHint={t('Не выбран ни один город.')}
           onDraftChange={setCityDraft}
           onAdd={() => {
             setCities((current) => addPendingPlace(current, cityDraft));
@@ -710,13 +724,13 @@ function FiltersSection({ session }: { session: SessionInfo }) {
 
         <PlacePicker
           id="filter-regions"
-          legend="Регионы"
+          legend={t('Регионы')}
           values={regions}
           draft={regionDraft}
           options={REGION_SUGGESTIONS}
-          addLabel="Добавить регион"
-          placeholder="Начните вводить название"
-          emptyHint="Не выбран ни один регион."
+          addLabel={t('Добавить регион')}
+          placeholder={t('Начните вводить название')}
+          emptyHint={t('Не выбран ни один регион.')}
           onDraftChange={setRegionDraft}
           onAdd={() => {
             setRegions((current) => addPendingPlace(current, regionDraft));
@@ -728,14 +742,14 @@ function FiltersSection({ session }: { session: SessionInfo }) {
       </fieldset>
 
       <LanguagePicker
-        legend="Общий язык"
+        legend={t('Общий язык')}
         selected={languages}
         onToggle={(value) => setLanguages((current) => toggle(current, value))}
         disabled={save.isPending}
       />
 
       <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">Если подходящего собеседника долго нет</span>
+        <span className="text-sm font-medium">{t('Если подходящего собеседника долго нет')}</span>
         {/*
           The button's name is the *setting*, never its current value: a toggle whose label
           flips between "Ничего не снимать" and "Разрешить снимать фильтры по одному" reads
@@ -751,21 +765,21 @@ function FiltersSection({ session }: { session: SessionInfo }) {
             onClick={() => setRelaxAllowed((current) => !current)}
             className={chipClass(relaxAllowed)}
           >
-            Снимать фильтры по одному
+            {t('Снимать фильтры по одному')}
           </button>
           <span className="text-sm text-muted-foreground">
-            {relaxAllowed ? 'Разрешено' : 'Запрещено'}
+            {relaxAllowed ? t('Разрешено') : t('Запрещено')}
           </span>
         </div>
         <p className="text-xs text-muted-foreground">
-          Снятие никогда не происходит молча: сервер сообщит, какой фильтр снят.
+          {t('Снятие никогда не происходит молча: сервер сообщит, какой фильтр снят.')}
         </p>
       </div>
 
       <div className="rounded-lg border border-border p-2.5">
-        <p className="section-label">Будет применяться</p>
+        <p className="section-label">{t('Будет применяться')}</p>
         {preview.length === 0 ? (
-          <p className="mt-1 text-sm">Без фильтров — подойдёт любой собеседник.</p>
+          <p className="mt-1 text-sm">{t('Без фильтров — подойдёт любой собеседник.')}</p>
         ) : (
           <ul className="mt-1 flex flex-col gap-0.5 text-sm">
             {preview.map((line) => (
@@ -778,13 +792,13 @@ function FiltersSection({ session }: { session: SessionInfo }) {
       {!draft.success ? (
         <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
           <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-          {firstProblem(draft)}
+          {firstProblem(draft, t)}
         </p>
       ) : null}
 
       {save.isError ? (
         <p className="text-sm text-destructive" role="alert">
-          {describeError(save.error)}
+          {describeError(save.error, locale)}
         </p>
       ) : null}
 
@@ -800,7 +814,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
           ) : (
             <Save className="size-4" aria-hidden="true" />
           )}
-          Сохранить фильтры
+          {t('Сохранить фильтры')}
         </Button>
       </div>
     </section>
@@ -811,20 +825,22 @@ function FiltersSection({ session }: { session: SessionInfo }) {
 // Moderation
 // -----------------------------------------------------------------------------
 
-const POLICY_OPTIONS: Array<{ value: IncomingRequestPolicy; label: string; hint: string }> = [
-  {
-    value: 'everyone',
-    label: 'Принимать заявки',
-    hint: 'Любой, кто знает ваш User ID, может предложить чат.',
-  },
-  {
-    value: 'nobody',
-    label: 'Не принимать заявки',
-    hint: 'Вас можно найти, но предложить чат нельзя. Случайный поиск работает как обычно.',
-  },
-];
+const POLICY_OPTIONS: Array<{ value: IncomingRequestPolicy; label: MessageKey; hint: MessageKey }> =
+  [
+    {
+      value: 'everyone',
+      label: 'Принимать заявки',
+      hint: 'Любой, кто знает ваш User ID, может предложить чат.',
+    },
+    {
+      value: 'nobody',
+      label: 'Не принимать заявки',
+      hint: 'Вас можно найти, но предложить чат нельзя. Случайный поиск работает как обычно.',
+    },
+  ];
 
 function ModerationSection({ session }: { session: SessionInfo }) {
+  const { locale, t } = useI18n();
   const queryClient = useQueryClient();
 
   const updateSetting = useMutation({
@@ -859,11 +875,11 @@ function ModerationSection({ session }: { session: SessionInfo }) {
     <section className={SECTION} aria-labelledby="settings-moderation">
       <h3 id="settings-moderation" className="flex items-center gap-2 text-sm font-semibold">
         <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
-        Модерация
+        {t('Модерация')}
       </h3>
 
       <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">Входящие заявки</span>
+        <span className="text-sm font-medium">{t('Входящие заявки')}</span>
         <div className="grid gap-2 sm:grid-cols-2">
           {POLICY_OPTIONS.map((option) => {
             const selected = session.incomingRequests === option.value;
@@ -884,9 +900,9 @@ function ModerationSection({ session }: { session: SessionInfo }) {
                   {selected ? (
                     <ShieldCheck className="size-4 text-primary" aria-hidden="true" />
                   ) : null}
-                  {option.label}
+                  {t(option.label)}
                 </span>
-                <span className="text-xs text-muted-foreground">{option.hint}</span>
+                <span className="text-xs text-muted-foreground">{t(option.hint)}</span>
               </button>
             );
           })}
@@ -900,16 +916,17 @@ function ModerationSection({ session }: { session: SessionInfo }) {
       */}
       {!session.blockingEnabled ? (
         <p className="border-t border-border pt-3 text-xs text-muted-foreground">
-          Блокировка собеседника сейчас отключена администрацией. Ранее заблокированные остаются
-          заблокированными, и снять блокировку можно ниже.
+          {t(
+            'Блокировка собеседника сейчас отключена администрацией. Ранее заблокированные остаются заблокированными, и снять блокировку можно ниже.',
+          )}
         </p>
       ) : null}
 
       <div className="flex flex-col gap-3 border-t border-border pt-3">
-        <span className="text-sm font-medium">Заблокированные</span>
+        <span className="text-sm font-medium">{t('Заблокированные')}</span>
 
         {blocks.isPending ? (
-          <div className="flex flex-col gap-2" aria-busy="true" aria-label="Загрузка списка">
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label={t('Загрузка списка')}>
             <Skeleton className="h-11 w-full" />
             <Skeleton className="h-11 w-full" />
           </div>
@@ -918,12 +935,12 @@ function ModerationSection({ session }: { session: SessionInfo }) {
         {blocks.isError ? (
           <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
             <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-            {describeError(blocks.error)}
+            {describeError(blocks.error, locale)}
           </p>
         ) : null}
 
         {blocks.isSuccess && blocks.data.blocks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Список пуст.</p>
+          <p className="text-sm text-muted-foreground">{t('Список пуст.')}</p>
         ) : null}
 
         {blocks.data?.blocks.map((block) => (
@@ -945,21 +962,21 @@ function ModerationSection({ session }: { session: SessionInfo }) {
               ) : (
                 <Ban className="size-4" aria-hidden="true" />
               )}
-              Разблокировать
+              {t('Разблокировать')}
             </Button>
           </div>
         ))}
 
         {unblock.isError ? (
           <p className="text-sm text-destructive" role="alert">
-            {describeError(unblock.error)}
+            {describeError(unblock.error, locale)}
           </p>
         ) : null}
       </div>
 
       {updateSetting.isError ? (
         <p className="text-sm text-destructive" role="alert">
-          {describeError(updateSetting.error)}
+          {describeError(updateSetting.error, locale)}
         </p>
       ) : null}
     </section>
@@ -968,8 +985,14 @@ function ModerationSection({ session }: { session: SessionInfo }) {
 
 /** Placeholder used while the settings load. */
 export function SettingsSkeleton() {
+  const { t } = useI18n();
+
   return (
-    <div className="grid gap-3 lg:grid-cols-2" aria-busy="true" aria-label="Загружаем настройки">
+    <div
+      className="grid gap-3 lg:grid-cols-2"
+      aria-busy="true"
+      aria-label={t('Загружаем настройки')}
+    >
       <Skeleton className="h-64 w-full rounded-card" />
       <Skeleton className="h-64 w-full rounded-card" />
     </div>

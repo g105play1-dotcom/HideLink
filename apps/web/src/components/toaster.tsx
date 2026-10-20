@@ -4,6 +4,7 @@ import { CircleAlert, CircleCheck, Info, X } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useAppStore, type Notice } from '@/store/app-store';
 
@@ -25,6 +26,7 @@ const ICONS = { info: Info, success: CircleCheck, error: CircleAlert } as const;
  * `role="status"` region so a screen reader announces it on appearance.
  */
 export function Toaster() {
+  const { t } = useI18n();
   const notices = useAppStore((state) => state.notices);
   const dismiss = useAppStore((state) => state.dismissNotice);
 
@@ -73,7 +75,7 @@ export function Toaster() {
               variant="ghost"
               size="icon"
               className="-mt-1 -mr-1 size-7"
-              aria-label="Закрыть уведомление"
+              aria-label={t('Закрыть уведомление')}
               onClick={() => dismiss(notice.id)}
             >
               <X className="size-4" aria-hidden="true" />

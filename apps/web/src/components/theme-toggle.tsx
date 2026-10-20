@@ -2,6 +2,7 @@
 
 import { Moon, Sun } from 'lucide-react';
 
+import { useI18n } from '@/i18n';
 import { useTheme } from '@/lib/theme';
 
 /**
@@ -13,6 +14,7 @@ import { useTheme } from '@/lib/theme';
  * so it is clear what pressing it will do.
  */
 export function ThemeToggle() {
+  const { t } = useI18n();
   const [theme, setTheme] = useTheme();
   const dark = theme === 'dark';
 
@@ -20,8 +22,8 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={() => setTheme(dark ? 'light' : 'dark')}
-      aria-label={dark ? 'Включить светлую тему' : 'Включить тёмную тему'}
-      title={dark ? 'Светлая тема' : 'Тёмная тема'}
+      aria-label={t(dark ? 'Включить светлую тему' : 'Включить тёмную тему')}
+      title={t(dark ? 'Светлая тема' : 'Тёмная тема')}
       className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
       {dark ? (

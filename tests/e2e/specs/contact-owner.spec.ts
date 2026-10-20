@@ -40,7 +40,13 @@ test.describe('contacting the owner', () => {
     await expect(send).toBeDisabled();
 
     // The subsections the owner asked for are all offered.
-    for (const topic of ['Жалоба', 'Предложение', 'Ошибка в работе', 'Реклама', 'Сотрудничество']) {
+    for (const topic of [
+      'Жалоба на пользователя',
+      'Предложение',
+      'Ошибка в работе',
+      'Реклама',
+      'Сотрудничество',
+    ]) {
       await expect(dialog.getByRole('radio', { name: topic, exact: true })).toBeVisible();
     }
 

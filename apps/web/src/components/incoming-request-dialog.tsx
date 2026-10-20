@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { formatRemaining } from '@/lib/format';
 import { useTicker } from '@/lib/use-ticker';
@@ -17,6 +18,7 @@ import { useAppStore } from '@/store/app-store';
  * be a mess, and the server caps how many can be pending anyway.
  */
 export function IncomingRequestDialog() {
+  const { locale, t } = useI18n();
   const requests = useAppStore((state) => state.incomingRequests);
   const [busy, setBusy] = useState(false);
 
@@ -43,8 +45,10 @@ export function IncomingRequestDialog() {
   return (
     <Dialog
       open={open}
-      title="Хотят начать с вами чат"
-      description="Человек нашёл вас по вашему User ID. Он не узнает, примете вы или нет, — увидит только результат."
+      title={t('Хотят начать с вами чат')}
+      description={t(
+        'Человек нашёл вас по вашему User ID. Он не узнает, примете вы или нет, — увидит только результат.',
+      )}
       // Deliberately not dismissible: an unanswered request would stay pending in the
       // background, which is more confusing than answering it.
       dismissible={false}
@@ -69,7 +73,7 @@ export function IncomingRequestDialog() {
               {current.note}
             </p>
           ) : (
-            <p className="text-sm text-muted-foreground">Без сообщения.</p>
+            <p className="text-sm text-muted-foreground">{t('Без сообщения.')}</p>
           )}
         </div>
 
@@ -81,25 +85,25 @@ export function IncomingRequestDialog() {
           */}
           <p className="flex items-center gap-2" role="status">
             <Timer className="size-3.5 shrink-0" aria-hidden="true" />
-            {expired ? 'Время заявки истекло.' : 'Заявка ждёт ответа.'}
+            {expired ? t('Время заявки истекло.') : t('Заявка ждёт ответа.')}
           </p>
 
           {expired ? null : (
             <p className="flex items-center gap-2">
-              <span>Истекает через:</span>
+              <span>{t('Истекает через:')}</span>
               <span translate="no" className="font-mono tabular-nums">
-                {formatRemaining(current.expiresAt, now)}
+                {formatRemaining(current.expiresAt, now, locale)}
               </span>
             </p>
           )}
 
-          {waiting > 0 ? <p>{`Ещё заявок в очереди: ${waiting}.`}</p> : null}
+          {waiting > 0 ? <p>{t('Ещё заявок в очереди: {count}.', { count: waiting })}</p> : null}
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" disabled={busy || expired} onClick={() => void respond(false)}>
             <X className="size-4" aria-hidden="true" />
-            Отклонить
+            {t('Отклонить')}
           </Button>
           <Button disabled={busy || expired} onClick={() => void respond(true)}>
             {busy ? (
@@ -107,7 +111,7 @@ export function IncomingRequestDialog() {
             ) : (
               <Check className="size-4" aria-hidden="true" />
             )}
-            Принять
+            {t('Принять')}
           </Button>
         </div>
       </div>

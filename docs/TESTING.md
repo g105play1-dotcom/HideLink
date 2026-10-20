@@ -28,15 +28,15 @@ the E2E package used to answer to `test`).
 | `packages/shared` | 5 | **89** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
 | `apps/api` | 14 | **166** | 29 unit + 137 integration |
-| `tests/e2e` | 10 | **29** | browser, two independent contexts |
-| **Total** | **30** | **292** | |
+| `tests/e2e` | 12 | **31** | browser, two independent contexts |
+| **Total** | **33** | **294** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
 `test/unit/platform.test.ts` 3) run without a server; the eleven integration files start a **real API
 process on port 3101** against the `*_test` database.
 
 **Last full run (2026-10-20, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `29 passed`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `31 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
@@ -103,7 +103,8 @@ leftover waiter and the failure looks like a filter bug.
 Playwright spawns its own stack — API on **3201**, web on **3200**, `*_test` database — in
 `tests/e2e/global-setup.ts`. There is no Playwright `webServer`, so those ports must be free, and
 `workers: 1` because matchmaking is global. Only two non-semantic hooks are permitted (`#own-user-id`
-and `data-chat-id`); everything else is a real ARIA role or visible Russian text. The stack pins
+and `data-chat-id`); everything else is a real ARIA role or visible text (Russian by default, unless a
+spec switches the language). The stack pins
 `ADMIN_TOKEN` (`tests/e2e/env.ts`) rather than inheriting one, so the owner's page is reachable in
 exactly one, non-secret, machine-independent way.
 
@@ -119,6 +120,7 @@ exactly one, non-secret, machine-independent way.
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
 | `moderation.spec.ts` | 2 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
+| `language.spec.ts` | 2 | The interface is Russian even in an `en-US` browser; the switch offers all three native names, changes `<html lang>`, the visible copy and (after a reload) the title, persists in both the cookie and `localStorage`, and returns to Russian; `/admin` stays Russian and declares `lang="ru"` while the public interface is English |
 
 `admin.spec.ts` is the newest, and it was written *after* the fact rather than before it. Using the
 owner's page by hand found two defects that no suite could see, because the defects lived exactly where
@@ -236,7 +238,9 @@ and the retention test — are exactly the things that a public launch depends o
 ## 9. Browser translation (manual — there is no automated equivalent)
 
 No test runner can drive Chrome's translator, so the rules in `docs/DECISIONS.md` D29 are checked by
-hand after any change that touches rendered text:
+hand after any change that touches rendered text. The built-in translations (D32) cover the three
+shipped languages automatically; this checklist covers everything a browser translator does to the
+page, including the languages the app does not ship.
 
 1. Open the app in Chrome with the Russian interface and translate the page into a language the app
    does not ship (right-click → «Перевести на английский», or any other).

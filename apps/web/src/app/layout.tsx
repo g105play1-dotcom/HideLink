@@ -1,16 +1,38 @@
 import type { Metadata, Viewport } from 'next';
+import { cookies } from 'next/headers';
 import type { ReactNode } from 'react';
 
 import { AppProviders } from '@/components/app-providers';
+import { SkipLink } from '@/components/skip-link';
+import { I18nProvider } from '@/i18n';
+import { DEFAULT_LOCALE, isLocale, LOCALE_COOKIE, type Locale } from '@/i18n/config';
+import { SITE_META } from '@/i18n/site';
 
 import './globals.css';
 
-export const metadata: Metadata = {
-  title: 'AnonLink — анонимный чат',
-  description:
-    'Анонимный чат один на один: случайный собеседник или чат по User ID. Без регистрации, почты и телефона.',
-  applicationName: 'AnonLink',
-};
+/**
+ * The language the server renders in.
+ *
+ * Only the cookie is consulted: the owner's rule is Russian by default, and the
+ * browser's `Accept-Language` must not override that. Reading a cookie makes the
+ * route dynamic, which is the honest cost of server-rendered `<html lang>` and
+ * language-specific metadata — a static shell would have to guess.
+ */
+async function currentLocale(): Promise<Locale> {
+  const store = await cookies();
+  const value = store.get(LOCALE_COOKIE)?.value;
+  return isLocale(value) ? value : DEFAULT_LOCALE;
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await currentLocale();
+
+  return {
+    title: SITE_META[locale].title,
+    description: SITE_META[locale].description,
+    applicationName: 'AnonLink',
+  };
+}
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -31,16 +53,18 @@ export const viewport: Viewport = {
  */
 const THEME_SCRIPT = `(function(){try{var s=localStorage.getItem('anonlink.theme');var d=s==='dark'||(s!=='light'&&matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;e.classList.toggle('dark',d);e.style.colorScheme=d?'dark':'light';}catch(e){}})();`;
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const locale = await currentLocale();
+
   return (
-    <html lang="ru">
+    <html lang={locale}>
       <body className="antialiased">
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {/* Real, working skip link — the first focusable element on the page. */}
-        <a href="#main" className="sr-only-focusable">
-          Перейти к основному содержимому
-        </a>
-        <AppProviders>{children}</AppProviders>
+        <I18nProvider initialLocale={locale}>
+          <SkipLink />
+          <AppProviders>{children}</AppProviders>
+        </I18nProvider>
       </body>
     </html>
   );

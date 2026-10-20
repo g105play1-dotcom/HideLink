@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { REPORT_REASON_LABELS } from '@/lib/error-text';
 import { cn } from '@/lib/utils';
@@ -20,6 +21,7 @@ import { cn } from '@/lib/utils';
  * the consequence is not a surprise.
  */
 export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useI18n();
   const [reason, setReason] = useState<ReportReason>('abuse');
   const [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,13 +42,13 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
   return (
     <Dialog
       open={open}
-      title="Пожаловаться на собеседника"
-      description="Чат будет сразу завершён. Ваш User ID не сообщается собеседнику."
+      title={t('Пожаловаться на собеседника')}
+      description={t('Чат будет сразу завершён. Ваш User ID не сообщается собеседнику.')}
       onClose={busy ? undefined : onClose}
     >
       <div className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-sm font-medium">Причина</legend>
+          <legend className="mb-1 text-sm font-medium">{t('Причина')}</legend>
 
           {REPORT_REASONS.map((value) => (
             <label
@@ -64,14 +66,15 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
                 onChange={() => setReason(value)}
                 className="accent-(--primary)"
               />
-              {REPORT_REASON_LABELS[value]}
+              {t(REPORT_REASON_LABELS[value])}
             </label>
           ))}
         </fieldset>
 
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium" htmlFor="report-details">
-            Подробности <span className="font-normal text-muted-foreground">(необязательно)</span>
+            {t('Подробности')}{' '}
+            <span className="font-normal text-muted-foreground">{t('(необязательно)')}</span>
           </label>
           <Textarea
             id="report-details"
@@ -79,17 +82,18 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
             onChange={(event) => setDetails(event.target.value)}
             rows={3}
             maxLength={500}
-            placeholder="Что именно произошло?"
+            placeholder={t('Что именно произошло?')}
           />
           <p className="text-xs text-muted-foreground">
-            Вместе с жалобой сохраняется текст последнего сообщения — это то, что проверяет
-            модерация.
+            {t(
+              'Вместе с жалобой сохраняется текст последнего сообщения — это то, что проверяет модерация.',
+            )}
           </p>
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Отмена
+            {t('Отмена')}
           </Button>
           <Button variant="destructive" onClick={() => void submit()} disabled={busy}>
             {busy ? (
@@ -97,7 +101,7 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
             ) : (
               <Flag className="size-4" aria-hidden="true" />
             )}
-            Отправить жалобу
+            {t('Отправить жалобу')}
           </Button>
         </div>
       </div>

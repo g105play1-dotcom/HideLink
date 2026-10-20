@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { describeChatEnd } from '@/lib/error-text';
 import { formatTime } from '@/lib/format';
@@ -52,6 +53,7 @@ export interface ChatPanelProps {
  * what was said, and the reason it ended, rather than watching the screen clear.
  */
 export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps) {
+  const { locale, t } = useI18n();
   const messages = useAppStore((state) => state.messages);
   const peerAway = useAppStore((state) => state.peerAway);
   const ended = useAppStore((state) => state.endedChat);
@@ -135,13 +137,13 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
             </span>
 
             <Badge variant={chat.kind === 'random' ? 'default' : 'accent'}>
-              {chat.kind === 'random' ? 'случайный' : 'по User ID'}
+              {chat.kind === 'random' ? t('случайный') : t('по User ID')}
             </Badge>
 
             {peerAway && !ended ? (
               <Badge variant="warning">
                 <WifiOff className="size-3.5" aria-hidden="true" />
-                собеседник отключился
+                {t('собеседник отключился')}
               </Badge>
             ) : null}
           </div>
@@ -164,12 +166,12 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
             {canBlock ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onBlock}>
                 <Ban className="size-4" aria-hidden="true" />
-                <span className="sr-only sm:not-sr-only">Блокировать</span>
+                <span className="sr-only sm:not-sr-only">{t('Блокировать')}</span>
               </Button>
             ) : null}
             <Button variant="ghost" size="sm" disabled={busy} onClick={onReport}>
               <Flag className="size-4" aria-hidden="true" />
-              <span className="sr-only sm:not-sr-only">Жалоба</span>
+              <span className="sr-only sm:not-sr-only">{t('Жалоба')}</span>
             </Button>
             <Button
               variant="outline"
@@ -178,7 +180,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               onClick={() => void run(() => client.nextPeer())}
             >
               <SkipForward className="size-4" aria-hidden="true" />
-              Следующий
+              {t('Следующий')}
             </Button>
             <Button
               variant="outline"
@@ -187,7 +189,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               onClick={() => void run(() => client.leaveChat())}
             >
               <LogOut className="size-4" aria-hidden="true" />
-              Завершить
+              {t('Завершить')}
             </Button>
           </div>
         ) : null}
@@ -198,12 +200,12 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
         className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-4"
         role="log"
         aria-live="polite"
-        aria-label="Переписка"
+        aria-label={t('Переписка')}
       >
         {messages.length === 0 && !ended ? (
           <p className="mx-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-center text-sm text-muted-foreground">
             <MessageSquare className="size-4" aria-hidden="true" />
-            Напишите первое сообщение.
+            {t('Напишите первое сообщение.')}
           </p>
         ) : null}
 
@@ -219,12 +221,12 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
         <div className="flex flex-col gap-3 border-t border-border bg-muted p-4">
           <p className="flex items-center gap-2 text-sm">
             <CircleAlert className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {describeChatEnd(ended.reason)}
+            {describeChatEnd(ended.reason, locale)}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy} onClick={() => void run(() => client.nextPeer())}>
               <SkipForward className="size-4" aria-hidden="true" />
-              Найти нового собеседника
+              {t('Найти нового собеседника')}
             </Button>
             {canWriteAgain && peerPublicId ? (
               <Button
@@ -233,7 +235,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
                 onClick={() => void run(() => client.requestDirect(peerPublicId))}
               >
                 <RefreshCw className="size-4" aria-hidden="true" />
-                Написать снова
+                {t('Написать снова')}
               </Button>
             ) : null}
             {/*
@@ -243,14 +245,14 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
             */}
             <Button variant="ghost" disabled={busy} onClick={clearConversation}>
               <Check className="size-4" aria-hidden="true" />
-              Готово
+              {t('Готово')}
             </Button>
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-2 border-t border-border bg-card p-3">
           <label className="sr-only" htmlFor="chat-composer">
-            Сообщение
+            {t('Сообщение')}
           </label>
           <div className="flex items-end gap-2">
             <Textarea
@@ -261,14 +263,14 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               onKeyDown={handleKeyDown}
               rows={1}
               dir="auto"
-              placeholder="Введите сообщение…"
+              placeholder={t('Введите сообщение…')}
               className="max-h-40 min-h-10"
               aria-invalid={tooLong}
               {...(tooLong ? { 'aria-describedby': 'composer-length' } : {})}
             />
             <Button className="h-10" disabled={!canSend} onClick={send}>
               <CornerDownLeft className="size-4" aria-hidden="true" />
-              Отправить
+              {t('Отправить')}
             </Button>
           </div>
 
@@ -278,7 +280,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               browser translators do not translate `placeholder` attributes, and a Chinese
               user would keep a Russian instruction inside the field (docs/DECISIONS.md D29).
             */}
-            <span>Только текст. Enter — отправить, Shift+Enter — новая строка.</span>
+            <span>{t('Только текст. Enter — отправить, Shift+Enter — новая строка.')}</span>
             {/* Only shown near the limit, so it is a warning rather than noise. */}
             {draft.length > maxLength * 0.8 ? (
               <span
@@ -293,7 +295,9 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
 
           {tooLong ? (
             <p className="text-xs text-destructive" role="alert">
-              Сообщение слишком длинное — сократите его на {draft.length - maxLength} симв.
+              {t('Сообщение слишком длинное — сократите его на {count} симв.', {
+                count: draft.length - maxLength,
+              })}
             </p>
           ) : null}
         </div>
@@ -304,6 +308,8 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
 
 /** One message bubble. `from` is decided by the server, never guessed locally. */
 function MessageBubble({ message }: { message: UiMessage }) {
+  const { locale, t } = useI18n();
+
   if (message.from === 'system') {
     return (
       <p className="mx-auto flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-center text-xs text-muted-foreground">
@@ -353,17 +359,19 @@ function MessageBubble({ message }: { message: UiMessage }) {
             mine && !failed ? 'text-primary-foreground/70' : 'text-muted-foreground',
           )}
         >
-          {formatTime(message.sentAt)}
+          {formatTime(message.sentAt, locale)}
           {message.status === 'sending' ? (
             <>
               <LoaderCircle className="size-3 animate-spin" aria-hidden="true" />
-              отправляется
+              {t('отправляется')}
             </>
           ) : null}
           {failed ? (
             <>
               <TriangleAlert className="size-3" aria-hidden="true" />
-              не отправлено{message.failureReason ? `: ${message.failureReason}` : ''}
+              {message.failureReason
+                ? t('не отправлено: {reason}', { reason: message.failureReason })
+                : t('не отправлено')}
             </>
           ) : null}
         </span>
@@ -379,10 +387,12 @@ function MessageBubble({ message }: { message: UiMessage }) {
  * rendered instead of an empty card so the transition never looks like a glitch.
  */
 export function ChatConnecting() {
+  const { t } = useI18n();
+
   return (
     <Card className="flex flex-1 flex-col items-center justify-center gap-3 p-8">
       <Search className="size-5 animate-pulse text-primary" aria-hidden="true" />
-      <p className="text-sm text-muted-foreground">Открываем чат…</p>
+      <p className="text-sm text-muted-foreground">{t('Открываем чат…')}</p>
     </Card>
   );
 }

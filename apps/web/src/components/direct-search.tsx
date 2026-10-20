@@ -12,6 +12,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { describeError } from '@/lib/error-text';
 import { formatRemaining } from '@/lib/format';
@@ -36,6 +37,7 @@ import { useAppStore } from '@/store/app-store';
  * spending a request on it, and the server applies exactly the same rule.
  */
 export function DirectSearch() {
+  const { locale, t } = useI18n();
   const ownPublicId = useAppStore((state) => state.session?.publicId ?? null);
   const outgoingRequest = useAppStore((state) => state.outgoingRequest);
 
@@ -64,7 +66,7 @@ export function DirectSearch() {
   const notFound = lookup.isSuccess && !lookup.data.exists;
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Чат по User ID">
+    <section className="flex flex-col gap-2" aria-label={t('Чат по User ID')}>
       <form
         className="flex gap-2"
         onSubmit={(event) => {
@@ -73,13 +75,13 @@ export function DirectSearch() {
         }}
       >
         <label className="sr-only" htmlFor="target-user-id">
-          User ID собеседника
+          {t('User ID собеседника')}
         </label>
         <Input
           id="target-user-id"
           value={input}
           onChange={(event) => setInput(event.target.value)}
-          placeholder="Вставьте сюда ID собеседника"
+          placeholder={t('Вставьте сюда ID собеседника')}
           autoComplete="off"
           spellCheck={false}
           className="font-mono"
@@ -87,7 +89,7 @@ export function DirectSearch() {
         />
         <Button type="submit" disabled={input.trim().length === 0}>
           <Search className="size-4" aria-hidden="true" />
-          Найти
+          {t('Найти')}
         </Button>
       </form>
 
@@ -95,14 +97,14 @@ export function DirectSearch() {
       {submitted !== null && !formatValid ? (
         <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
           <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-          Неверный формат. User ID состоит из 14 символов и начинается с AL.
+          {t('Неверный формат. User ID состоит из 14 символов и начинается с AL.')}
         </p>
       ) : null}
 
       {isSelf ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
           <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-          Это ваш собственный User ID.
+          {t('Это ваш собственный User ID.')}
         </p>
       ) : null}
 
@@ -110,13 +112,13 @@ export function DirectSearch() {
       {formatValid && !isSelf && lookup.isPending ? (
         <p className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
           <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-          Проверяем…
+          {t('Проверяем…')}
         </p>
       ) : null}
 
       {formatValid && !isSelf && lookup.isError ? (
         <p className="text-sm text-destructive" role="alert">
-          {describeError(lookup.error)}
+          {describeError(lookup.error, locale)}
         </p>
       ) : null}
 
@@ -124,14 +126,14 @@ export function DirectSearch() {
         <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
           {notFound ? (
             <p className="text-sm text-muted-foreground">
-              Пользователь с таким ID не найден. Проверьте, нет ли опечатки.
+              {t('Пользователь с таким ID не найден. Проверьте, нет ли опечатки.')}
             </p>
           ) : lookup.data.acceptsRequests ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="flex items-center gap-2 text-sm">
                   <CircleCheck className="size-4 text-success" aria-hidden="true" />
-                  Пользователь найден и принимает заявки.
+                  {t('Пользователь найден и принимает заявки.')}
                 </p>
                 <Button
                   size="sm"
@@ -143,7 +145,7 @@ export function DirectSearch() {
                   ) : (
                     <Send className="size-4" aria-hidden="true" />
                   )}
-                  Отправить заявку
+                  {t('Отправить заявку')}
                 </Button>
               </div>
 
@@ -163,8 +165,9 @@ export function DirectSearch() {
                 */
                 <div className="flex flex-col gap-1">
                   <p className="text-xs text-muted-foreground">
-                    В отличие от случайного чата, получатель увидит ваш User ID — иначе он не
-                    поймёт, кто с ним хочет поговорить.
+                    {t(
+                      'В отличие от случайного чата, получатель увидит ваш User ID — иначе он не поймёт, кто с ним хочет поговорить.',
+                    )}
                   </p>
                   <code
                     translate="no"
@@ -177,7 +180,7 @@ export function DirectSearch() {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Пользователь найден, но он отключил входящие заявки.
+              {t('Пользователь найден, но он отключил входящие заявки.')}
             </p>
           )}
         </div>
@@ -194,12 +197,12 @@ export function DirectSearch() {
           */}
           <p className="flex items-center gap-2 text-sm" role="status">
             <Timer className="size-4 shrink-0 text-primary" aria-hidden="true" />
-            Заявка отправлена. Ждём ответа.
+            {t('Заявка отправлена. Ждём ответа.')}
           </p>
           <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>Истекает через:</span>
+            <span>{t('Истекает через:')}</span>
             <span translate="no" className="font-mono tabular-nums">
-              {formatRemaining(outgoingRequest.expiresAt, now)}
+              {formatRemaining(outgoingRequest.expiresAt, now, locale)}
             </span>
           </p>
         </div>

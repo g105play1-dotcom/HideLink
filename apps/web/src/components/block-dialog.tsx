@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 
 /**
@@ -19,6 +20,7 @@ import { client } from '@/lib/anonymous-client';
  * must not be slowed down, but the durable one can be.
  */
 export function BlockDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
 
   async function confirm() {
@@ -34,20 +36,22 @@ export function BlockDialog({ open, onClose }: { open: boolean; onClose: () => v
   return (
     <Dialog
       open={open}
-      title="Заблокировать собеседника?"
-      description="Чат завершится сразу. Вы больше не будете попадаться друг другу при случайном поиске, и этот собеседник не сможет написать вам по User ID."
+      title={t('Заблокировать собеседника?')}
+      description={t(
+        'Чат завершится сразу. Вы больше не будете попадаться друг другу при случайном поиске, и этот собеседник не сможет написать вам по User ID.',
+      )}
       onClose={busy ? undefined : onClose}
     >
       <div className="flex flex-col gap-4">
         <p className="text-xs text-muted-foreground">
-          Случайные собеседники не видят ваш User ID, но блокировка всё равно их запоминает — на
-          случай, если вы встретитесь снова. Список блокировок можно посмотреть в разделе
-          «Настройки».
+          {t(
+            'Случайные собеседники не видят ваш User ID, но блокировка всё равно их запоминает — на случай, если вы встретитесь снова. Список блокировок можно посмотреть в разделе «Настройки».',
+          )}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Отмена
+            {t('Отмена')}
           </Button>
           <Button variant="destructive" onClick={() => void confirm()} disabled={busy}>
             {busy ? (
@@ -55,7 +59,7 @@ export function BlockDialog({ open, onClose }: { open: boolean; onClose: () => v
             ) : (
               <Ban className="size-4" aria-hidden="true" />
             )}
-            Заблокировать
+            {t('Заблокировать')}
           </Button>
         </div>
       </div>

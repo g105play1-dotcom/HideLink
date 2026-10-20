@@ -740,3 +740,66 @@ separate module and controller for moderation (the owner surface is already one 
 splitting it would duplicate the guard wiring without adding a boundary); building moderator
 accounts now (the owner explicitly deferred them, and a fake role without an audit trail would be
 worse than none).
+
+## D32. The interface speaks Russian, English and Chinese; Russian is the default
+
+**Context.** The owner asked (2026-10-20) for a language switch beside the theme switch, for
+Russian, English and Chinese, with each language named in itself. He also set two constraints that
+determine the design: **Russian is the default regardless of the browser's language**, and the
+existing browser-translator path (D29) must keep working. Until now the interface was Russian-only,
+and `PRODUCT_SPEC.md` §24 called built-in translations the next step.
+
+**Decision.**
+
+1. **Three built-in locales, one default.** `apps/web/src/i18n/config.ts` holds `ru`, `en`, `zh` and
+   `DEFAULT_LOCALE = 'ru'`. `Accept-Language` is never consulted: an English or Chinese browser
+   still opens the Russian interface until the person chooses otherwise. `/admin` is Russian-only
+   (see point 6).
+2. **The dictionary is hand-rolled.** `pnpm add next-intl@4.14.9` could not create its symlinks in
+   this environment (`os error 5`), and installing a framework was not necessary for three locales;
+   `apps/web/src/i18n/messages.ts` is a plain object plus a `translate()` function. No new
+   dependency, no route restructuring.
+3. **The Russian source string is the key.** `en` defines the key set, `zh` is typed as
+   `Record<keyof typeof en, string>` and the Russian dictionary is derived from the same keys. A
+   missing Chinese sentence is therefore a `pnpm typecheck` failure, and changing Russian wording
+   points the compiler at every call site. Placeholders (`{count}`, `{alias}`) are compared at module
+   load and a translation that drops one throws with the offending key, because TypeScript cannot
+   see inside a string.
+4. **Two ways to read the dictionary.** React components use `useI18n()` (locale, setter and `t`);
+   code that runs outside React — the socket client and the store's notifications — uses
+   `activeT`/`getActiveLocale`, a module-level mirror. Those notices are snapshots: a message already
+   on screen keeps the language it was created in, which is acceptable for seven-second feedback.
+   Durable text is always rendered from a key.
+5. **Persistence is a cookie plus a `localStorage` mirror.** `anonlink.locale` (not `HttpOnly`; it
+   is not a secret) is written by the switch and read by `app/layout.tsx` on the server, so
+   `<html lang>` and the page's title/description are correct before React hydrates. `localStorage`
+   keeps the choice where cookies are blocked. There is no locale in the URL and no per-account
+   setting: the user is anonymous, and a URL prefix would rewrite every link in the product.
+6. **Native names, and `/admin` stays Russian.** The switch is a native `<select>` labelled in the
+   current interface language, with `Русский`, `English`, `中文` marked `translate="no"`. The owner's
+   page keeps its hardcoded Russian text and forces `<html lang="ru">` while mounted, then restores
+   the previous value; it has one reader, and a half-translated owner surface would be worse than a
+   consistently Russian one.
+7. **What is never translated by us.** User IDs, language names (both in the switch and in the
+   profile vocabulary, D30), and chat messages. A message keeps its author's language and carries
+   `lang=""` and `dir="auto"` (D29), so a browser translator still detects each message separately.
+   Our own translations do not replace that path; they coexist with it.
+
+**Consequences.** Adding any user-visible sentence now means adding it to `en` and `zh`; the
+compiler enforces the second, and the runtime placeholder check protects both. The layout became
+dynamic (it reads a cookie), which is the honest cost of a correct server-rendered `<html lang>` and
+title. `apps/web/src/lib/error-text.ts`, `labels.ts` and `format.ts` take a `Locale`; the browser
+renders Russian text for server error *codes* in every locale, while the API itself continues to send
+codes and English messages. The E2E suite grows `language.spec.ts` (default Russian even under an
+`en-US` browser, all three dictionaries, persistence across a reload, `<html lang>`/title, and
+`/admin` remaining Russian).
+
+**Rejected.** `next-intl` (the install is blocked and the framework is heavier than the problem);
+locale detection from `Accept-Language` (directly contradicts "Russian by default"); `/ru`, `/en`,
+`/zh` routing (every link and the E2E helpers would need a locale, for an app whose identity is a
+cookie); storing the locale in the database (there is no account, and it would not survive the first
+request); translating language names (people find their own language by recognising it); translating
+chat messages on the server (it would change what the author said and break the per-message
+translator path); using English or Chinese keys (the source in the code is Russian, and a second
+copy would drift); a half-translated `/admin` (the owner reads Russian, and the moderation panel is
+the one place where an ambiguous label is dangerous).

@@ -7,6 +7,7 @@ import { AdSlot } from '@/components/ad-slot';
 import { SettingsPanel, SettingsSkeleton } from '@/components/settings-panel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { formatElapsed, formatRemaining } from '@/lib/format';
 import { CRITERION_LABELS, describeCriteria } from '@/lib/labels';
@@ -33,6 +34,7 @@ import { useAppStore, type SessionInfo } from '@/store/app-store';
  * user wants to know, and it proves the request is still alive.
  */
 export function SearchPanel({ session }: { session: SessionInfo | null }) {
+  const { locale, t } = useI18n();
   const phase = useAppStore((state) => state.phase);
   const searchingSince = useAppStore((state) => state.searchingSince);
   const searchCriteria = useAppStore((state) => state.searchCriteria);
@@ -60,7 +62,7 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
   }
 
   if (searching) {
-    const active = searchCriteria ? describeCriteria(searchCriteria) : [];
+    const active = searchCriteria ? describeCriteria(searchCriteria, locale) : [];
     // `relaxAfterMs` is measured from the moment the search started, and the start time is
     // the server's own `queuedAt`, so the deadline is exact rather than approximate.
     const relaxAt =
@@ -74,25 +76,25 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-sm font-semibold">
               <LoaderCircle className="size-4 animate-spin text-primary" aria-hidden="true" />
-              Ищем собеседника…
+              {t('Ищем собеседника…')}
             </span>
             <span
               translate="no"
               className="font-mono text-xl tabular-nums"
-              aria-label="Время ожидания"
+              aria-label={t('Время ожидания')}
             >
               {searchingSince ? formatElapsed(searchingSince, now) : '00:00'}
             </span>
             <Button variant="outline" size="sm" onClick={() => void cancel()} disabled={pending}>
-              Отменить поиск
+              {t('Отменить поиск')}
             </Button>
           </div>
 
           <div className="flex flex-col gap-1.5 rounded-lg border border-border p-3">
-            <p className="section-label">Ищем по фильтрам</p>
+            <p className="section-label">{t('Ищем по фильтрам')}</p>
 
             {active.length === 0 ? (
-              <p className="text-sm">Без фильтров — подойдёт любой собеседник.</p>
+              <p className="text-sm">{t('Без фильтров — подойдёт любой собеседник.')}</p>
             ) : (
               <ul className="flex flex-col gap-0.5 text-sm">
                 {active.map((line) => (
@@ -103,9 +105,11 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
 
             {relaxedCriteria.length > 0 ? (
               <p className="text-sm text-muted-foreground" role="status">
-                {`Уже снято: ${relaxedCriteria
-                  .map((criterion) => CRITERION_LABELS[criterion])
-                  .join(', ')}`}
+                {t('Уже снято: {criteria}', {
+                  criteria: relaxedCriteria
+                    .map((criterion) => t(CRITERION_LABELS[criterion]))
+                    .join(', '),
+                })}
               </p>
             ) : null}
 
@@ -117,13 +121,14 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
               */
               <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
                 <p>
-                  Если никто не найдётся, сервер начнёт снимать фильтры по одному и каждый раз
-                  сообщит, какой именно.
+                  {t(
+                    'Если никто не найдётся, сервер начнёт снимать фильтры по одному и каждый раз сообщит, какой именно.',
+                  )}
                 </p>
                 <p className="flex items-center gap-2">
-                  <span>До первого шага:</span>
+                  <span>{t('До первого шага:')}</span>
                   <span translate="no" className="font-mono tabular-nums">
-                    {formatRemaining(relaxAt, now)}
+                    {formatRemaining(relaxAt, now, locale)}
                   </span>
                 </p>
               </div>
@@ -131,14 +136,14 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Можно не ждать здесь — поиск продолжится, а чат откроется автоматически.
+            {t('Можно не ждать здесь — поиск продолжится, а чат откроется автоматически.')}
           </p>
         </CardContent>
       </Card>
     );
   }
 
-  const saved = savedSearch ? describeCriteria(savedSearch) : [];
+  const saved = savedSearch ? describeCriteria(savedSearch, locale) : [];
 
   return (
     <div className="flex flex-1 flex-col gap-3">
@@ -148,22 +153,22 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
             {pending ? (
               <>
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                Начинаем…
+                {t('Начинаем…')}
               </>
             ) : (
               <>
                 <Search className="size-4" aria-hidden="true" />
-                Найти собеседника
+                {t('Найти собеседника')}
               </>
             )}
           </Button>
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
             <div className="flex min-w-0 flex-col">
-              <span className="section-label">Фильтры поиска</span>
+              <span className="section-label">{t('Фильтры поиска')}</span>
               <span className="truncate text-sm">
                 {saved.length === 0
-                  ? 'Без фильтров — подойдёт любой собеседник.'
+                  ? t('Без фильтров — подойдёт любой собеседник.')
                   : saved.join(' · ')}
               </span>
             </div>
@@ -176,7 +181,7 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
               aria-controls="settings-panel"
             >
               <Settings2 className="size-4" aria-hidden="true" />
-              Настройки
+              {t('Настройки')}
             </Button>
           </div>
         </CardContent>

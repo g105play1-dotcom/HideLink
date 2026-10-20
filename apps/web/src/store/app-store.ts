@@ -9,6 +9,7 @@ import {
 } from '@anonlink/shared';
 import type { ChatKind, ChatMessageView, IncomingRequestPayload } from '@anonlink/protocol';
 
+import { activeT } from '@/i18n';
 import { randomId } from '@/lib/ids';
 
 /**
@@ -405,8 +406,10 @@ export const useAppStore = create<AppState>((set) => ({
           ...state.messages,
           systemMessage(
             away
-              ? `${state.chat.peerAlias} потерял соединение. Ждём восстановления…`
-              : `${state.chat.peerAlias} снова на связи.`,
+              ? activeT('{alias} потерял соединение. Ждём восстановления…', {
+                  alias: state.chat.peerAlias,
+                })
+              : activeT('{alias} снова на связи.', { alias: state.chat.peerAlias }),
           ),
         ],
       };

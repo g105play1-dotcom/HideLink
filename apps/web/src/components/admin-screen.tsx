@@ -37,12 +37,13 @@ import {
   Trash2,
   UserPlus,
 } from 'lucide-react';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { setHtmlLangOverride } from '@/i18n';
 import { describeError, REPORT_REASON_LABELS } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
 import { LANGUAGE_LABELS, OWNER_TOPIC_LABELS } from '@/lib/labels';
@@ -131,6 +132,17 @@ function toggle<T>(list: readonly T[], value: T): T[] {
 }
 
 export function AdminScreen() {
+  // The owner's page is Russian-only, whatever language the public interface is set
+  // to. The server-rendered `<html lang>` follows the cookie, so this overrides it on
+  // mount and clears the override on the way out. The *text* of this screen is never
+  // passed through the dictionary — there is one reader, and he reads Russian.
+  useEffect(() => {
+    setHtmlLangOverride('ru');
+    return () => {
+      setHtmlLangOverride(null);
+    };
+  }, []);
+
   const status = useQuery({
     queryKey: ['admin', 'status'],
     queryFn: () => apiRequest<AdminStatusView>('/admin/status'),

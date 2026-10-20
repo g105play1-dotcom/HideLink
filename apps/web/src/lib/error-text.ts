@@ -1,5 +1,8 @@
-import type { ChatEndReason, ErrorCode } from '@anonlink/shared';
+import type { ChatEndReason, ErrorCode, ReportReason } from '@anonlink/shared';
 import type { MatchCancelReason, RequestStatus } from '@anonlink/protocol';
+
+import { DEFAULT_LOCALE, type Locale } from '@/i18n/config';
+import { translate, type MessageKey } from '@/i18n/messages';
 
 /**
  * User-facing text, keyed by the *stable* machine-readable contract.
@@ -8,8 +11,13 @@ import type { MatchCancelReason, RequestStatus } from '@anonlink/protocol';
  * it knows: wording on the server can then change without leaving half-translated
  * copy in the browser, and a compromised/mismatched server cannot inject arbitrary
  * text into the interface.
+ *
+ * The second argument is the interface language. It defaults to Russian, which is
+ * what `/admin` needs: the owner's page is Russian-only even when the public
+ * interface is English or Chinese, and it must not inherit the module-level
+ * language of whichever tab happens to be open.
  */
-const ERROR_TEXT: Record<ErrorCode, string> = {
+const ERROR_TEXT: Record<ErrorCode, MessageKey> = {
   INVALID_INPUT: 'Некорректные данные. Проверьте ввод.',
   IDENTITY_REQUIRED: 'Нужна анонимная сессия. Обновите страницу.',
   IDENTITY_NOT_FOUND: 'Сессия больше не действительна. Обновите страницу.',
@@ -41,21 +49,21 @@ const ERROR_TEXT: Record<ErrorCode, string> = {
   DATABASE_UNAVAILABLE: 'Сервис временно недоступен.',
 };
 
-const FALLBACK_ERROR = 'Что-то пошло не так. Попробуйте ещё раз.';
+const FALLBACK_ERROR: MessageKey = 'Что-то пошло не так. Попробуйте ещё раз.';
 
 /**
- * Looks up Russian text for an error code, tolerating codes this build predates.
+ * Looks up text for an error code, tolerating codes this build predates.
  *
  * Accepts `unknown` so it can be handed anything that was thrown — an `ApiError`, a
  * plain `Error`, or a React Query error — without a cast at every call site.
  */
-export function describeError(error: unknown): string {
+export function describeError(error: unknown, locale: Locale = DEFAULT_LOCALE): string {
   if (typeof error === 'object' && error !== null) {
     const candidate = error as { code?: unknown; message?: unknown };
 
     if (typeof candidate.code === 'string') {
-      const known = (ERROR_TEXT as Record<string, string | undefined>)[candidate.code];
-      if (known) return known;
+      const known = (ERROR_TEXT as Record<string, MessageKey | undefined>)[candidate.code];
+      if (known) return translate(locale, known);
     }
 
     if (typeof candidate.message === 'string' && candidate.message.length > 0) {
@@ -63,10 +71,10 @@ export function describeError(error: unknown): string {
     }
   }
 
-  return FALLBACK_ERROR;
+  return translate(locale, FALLBACK_ERROR);
 }
 
-const CHAT_END_TEXT: Record<ChatEndReason, string> = {
+const CHAT_END_TEXT: Record<ChatEndReason, MessageKey> = {
   left: 'Вы завершили чат.',
   peer_left: 'Собеседник завершил чат.',
   disconnected: 'Собеседник отключился и не вернулся.',
@@ -76,11 +84,11 @@ const CHAT_END_TEXT: Record<ChatEndReason, string> = {
   expired: 'Чат завершён по истечении времени.',
 };
 
-export function describeChatEnd(reason: ChatEndReason): string {
-  return CHAT_END_TEXT[reason] ?? 'Чат завершён.';
+export function describeChatEnd(reason: ChatEndReason, locale: Locale = DEFAULT_LOCALE): string {
+  return translate(locale, CHAT_END_TEXT[reason] ?? 'Чат завершён.');
 }
 
-const REQUEST_STATUS_TEXT: Record<RequestStatus, string> = {
+const REQUEST_STATUS_TEXT: Record<RequestStatus, MessageKey> = {
   accepted: 'Заявка принята — чат начался.',
   declined: 'Заявка отклонена.',
   expired: 'Время заявки истекло.',
@@ -91,25 +99,31 @@ const REQUEST_STATUS_TEXT: Record<RequestStatus, string> = {
   self: 'Это ваш собственный User ID.',
 };
 
-export function describeRequestStatus(status: RequestStatus): string {
-  return REQUEST_STATUS_TEXT[status] ?? 'Заявка обработана.';
+export function describeRequestStatus(
+  status: RequestStatus,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, REQUEST_STATUS_TEXT[status] ?? 'Заявка обработана.');
 }
 
-const MATCH_CANCEL_TEXT: Record<MatchCancelReason, string> = {
+const MATCH_CANCEL_TEXT: Record<MatchCancelReason, MessageKey> = {
   user: 'Поиск отменён.',
   timeout: 'Поиск остановлен: слишком долго никто не находился.',
   chat_started: 'Собеседник найден.',
 };
 
-export function describeMatchCancel(reason: MatchCancelReason): string {
-  return MATCH_CANCEL_TEXT[reason] ?? 'Поиск остановлен.';
+export function describeMatchCancel(
+  reason: MatchCancelReason,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, MATCH_CANCEL_TEXT[reason] ?? 'Поиск остановлен.');
 }
 
 /** Reason labels offered in the report dialog, in the order they are shown. */
-export const REPORT_REASON_LABELS = {
+export const REPORT_REASON_LABELS: Record<ReportReason, MessageKey> = {
   spam: 'Спам или реклама',
   abuse: 'Оскорбления или травля',
   sexual: 'Неприемлемый контент',
   violence: 'Угрозы или насилие',
   other: 'Другое',
-} as const;
+};

@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { cn } from '@/lib/utils';
 import { useAppStore, type SessionInfo } from '@/store/app-store';
@@ -27,6 +28,7 @@ import { useAppStore, type SessionInfo } from '@/store/app-store';
  * what the ID is *for* (showing it to someone) rather than what it is not.
  */
 export function IdentityStrip({ session }: { session: SessionInfo }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [confirmingRotate, setConfirmingRotate] = useState(false);
   const [rotating, setRotating] = useState(false);
@@ -41,7 +43,7 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
       // browser refuses, say so rather than pretending it worked.
       useAppStore
         .getState()
-        .notify('info', 'Браузер не разрешил копирование. Выделите ID и скопируйте вручную.');
+        .notify('info', t('Браузер не разрешил копирование. Выделите ID и скопируйте вручную.'));
     }
   }
 
@@ -55,7 +57,7 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
   return (
     <div className="flex min-w-0 flex-col">
       <div className="flex items-baseline gap-2">
-        <span className="section-label">Ваш User ID</span>
+        <span className="section-label">{t('Ваш User ID')}</span>
         <span
           className={cn(
             'flex items-center gap-1 text-[11px]',
@@ -65,10 +67,10 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
           {copied ? (
             <>
               <Check className="size-3" aria-hidden="true" />
-              Скопировано
+              {t('Скопировано')}
             </>
           ) : (
-            'Нажмите на него, чтобы скопировать'
+            t('Нажмите на него, чтобы скопировать')
           )}
         </span>
       </div>
@@ -85,7 +87,7 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
           id="own-user-id"
           translate="no"
           onClick={() => void copyId()}
-          title="Скопировать User ID"
+          title={t('Скопировать User ID')}
           className="flex items-center gap-1.5 rounded-lg border border-border bg-muted px-2 py-1 font-mono text-sm tracking-wider transition-colors select-all hover:border-primary hover:bg-accent/40"
         >
           {formatPublicIdForDisplay(session.publicId)}
@@ -95,8 +97,8 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
         <button
           type="button"
           onClick={() => setConfirmingRotate(true)}
-          aria-label="Получить новый User ID"
-          title="Получить новый User ID"
+          aria-label={t('Получить новый User ID')}
+          title={t('Получить новый User ID')}
           className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <RefreshCw className="size-3.5" aria-hidden="true" />
@@ -105,14 +107,18 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
 
       <Dialog
         open={confirmingRotate}
-        title="Получить новый User ID?"
-        description="Текущий ID перестанет работать сразу же, и все ваши открытые сессии будут закрыты. Прошлый ID восстановить нельзя."
+        title={t('Получить новый User ID?')}
+        description={t(
+          'Текущий ID перестанет работать сразу же, и все ваши открытые сессии будут закрыты. Прошлый ID восстановить нельзя.',
+        )}
         onClose={() => setConfirmingRotate(false)}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-start gap-2 text-xs text-muted-foreground">
             <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-            Ваш User ID — не пароль: по нему можно только предложить вам чат, если заявки разрешены.
+            {t(
+              'Ваш User ID — не пароль: по нему можно только предложить вам чат, если заявки разрешены.',
+            )}
           </p>
           <div className="flex flex-wrap justify-end gap-2">
             <Button
@@ -120,10 +126,10 @@ export function IdentityStrip({ session }: { session: SessionInfo }) {
               onClick={() => setConfirmingRotate(false)}
               disabled={rotating}
             >
-              Отмена
+              {t('Отмена')}
             </Button>
             <Button variant="destructive" onClick={() => void rotate()} disabled={rotating}>
-              {rotating ? 'Меняем…' : 'Да, получить новый'}
+              {rotating ? t('Меняем…') : t('Да, получить новый')}
             </Button>
           </div>
         </div>
