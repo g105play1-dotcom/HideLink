@@ -138,7 +138,7 @@ export function HomeScreen() {
 
         {/*
           The one way to reach a human. It lives in the footer rather than in the settings
-          drawer on purpose: "связаться с хозяином" is not a preference, and someone who is
+          drawer on purpose: "связаться с администрацией" is not a preference, and someone who is
           annoyed with the service should not have to open their own profile to say so.
         */}
         <footer className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-muted-foreground">
@@ -149,7 +149,7 @@ export function HomeScreen() {
             className="inline-flex items-center gap-1.5 font-medium text-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
           >
             <Mail className="size-3.5" aria-hidden="true" />
-            Связаться с хозяином
+            Связаться с администрацией
           </button>
         </footer>
       </div>

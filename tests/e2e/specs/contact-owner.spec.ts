@@ -4,7 +4,7 @@ import { expectNoClientErrors, newIdentity } from '../support/app';
 import { openOwnerPage, resetInbox, signIn } from '../support/owner';
 
 /**
- * "Связаться с хозяином" — the one form that sends text to the operator.
+ * "Связаться с администрацией" — the one form that sends text to the operator.
  *
  * ## What only a browser test can prove
  *
@@ -28,15 +28,15 @@ test.describe('contacting the owner', () => {
     const user = await newIdentity(browser);
     const owner = await openOwnerPage(browser);
 
-    await user.page.getByRole('button', { name: 'Связаться с хозяином', exact: true }).click();
+    await user.page
+      .getByRole('button', { name: 'Связаться с администрацией', exact: true })
+      .click();
 
     const dialog = user.page.getByRole('dialog');
-    await expect(
-      dialog.getByRole('heading', { name: 'Связаться с хозяином сервиса' }),
-    ).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Связаться с администрацией' })).toBeVisible();
 
     // Nothing to send yet, and the interface says so instead of sending an empty message.
-    const send = dialog.getByRole('button', { name: 'Отправить хозяину', exact: true });
+    const send = dialog.getByRole('button', { name: 'Отправить администрации', exact: true });
     await expect(send).toBeDisabled();
 
     // The subsections the owner asked for are all offered.
@@ -56,7 +56,7 @@ test.describe('contacting the owner', () => {
     await send.click();
 
     // The confirmation is the user's only evidence — there is no "sent" screen.
-    await expect(user.page.getByText('Сообщение отправлено хозяину сервиса.')).toBeVisible();
+    await expect(user.page.getByText('Сообщение отправлено администрации.')).toBeVisible();
     await expect(user.page.getByRole('dialog')).toHaveCount(0);
 
     await signIn(owner.page);

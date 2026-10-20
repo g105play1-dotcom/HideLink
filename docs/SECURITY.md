@@ -25,7 +25,7 @@ The privacy posture is a storage decision, not a policy paragraph.
 | Chat messages | **Only if the owner switches archiving on** — it is off by default. Otherwise in memory only, bounded by `CHAT_MEMORY_MESSAGE_LIMIT`, dropped when the chat ends. The archive is described in §13. |
 | Who talked to whom | `ChatSession` always records lifecycle metadata (participants, start/end, `messageCount`, end reason) — never text. A transcript exists only for chats the owner's archive policy selected (§13). |
 | Message text of a reported message | Only inside the abuse report, until `REPORT_RETENTION_DAYS` (default 30) elapses, then hard-deleted. |
-| Message text sent through "Связаться с хозяином" | **Yes, on purpose** — the user asked a human to read it, and is told so before sending. Bounded by `OWNER_MESSAGE_MAX_LENGTH`, deleted after `OWNER_MESSAGE_RETENTION_DAYS` (default 180), readable only with `ADMIN_TOKEN` (§13.1). |
+| Message text sent through "Связаться с администрацией" | **Yes, on purpose** — the user asked a human to read it, and is told so before sending. Bounded by `OWNER_MESSAGE_MAX_LENGTH`, deleted after `OWNER_MESSAGE_RETENTION_DAYS` (default 180), readable only with `ADMIN_TOKEN` (§13.1). |
 | Name, e-mail, phone, address, GPS, device id | **Never asked for, never stored.** There is no code path that accepts them. |
 | Client IP / User-Agent | **Not stored by default.** Only a salted SHA-256 digest, and only when `ABUSE_HASH_SALT` is deliberately set. |
 | Session token | Only its SHA-256 digest (`IdentityService.createIdentity` → `sha256Hex(token)`). |
@@ -241,7 +241,7 @@ which is the enforcement point for every deadline in the schema:
 | Security events | after `SECURITY_EVENT_RETENTION_DAYS` (90) |
 | Sessions | after `SESSION_RETENTION_DAYS` (7) past expiring or being revoked |
 | Archived conversations (§13) | after the owner's `retentionDays`; `0` means only when the owner deletes them |
-| "Связаться с хозяином" messages (§13.1) | after `OWNER_MESSAGE_RETENTION_DAYS` (180) |
+| "Связаться с администрацией" messages (§13.1) | after `OWNER_MESSAGE_RETENTION_DAYS` (180) |
 | Finished chats in memory | after their tombstone expires (`ChatRegistryService.sweep`) |
 | Stale queue tickets, expired requests, rate-limit keys | every sweep |
 
@@ -297,7 +297,7 @@ the page.
 Moderators are a separate matter: there is still no moderation console, and a report carries only the
 single snapshotted message that was reported.
 
-### 13.1 The owner's inbox ("Связаться с хозяином")
+### 13.1 The owner's inbox ("Связаться с администрацией")
 
 A user who wants to reach the operator fills one form (topic, text, optional contact line). Unlike
 everything else a user writes, this text is stored on purpose — the point of the form is that a human

@@ -63,7 +63,7 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
       setText('');
       setContact('');
       onClose();
-      notify('success', 'Сообщение отправлено хозяину сервиса.');
+      notify('success', 'Сообщение отправлено администрации.');
     } catch (error) {
       // The text is kept on purpose: a failed send must not cost the user what they wrote.
       notify('error', describeError(error));
@@ -75,7 +75,7 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
   return (
     <Dialog
       open={open}
-      title="Связаться с хозяином сервиса"
+      title="Связаться с администрацией"
       description="Выберите тему, чтобы сообщение попало по адресу."
       onClose={busy ? undefined : onClose}
     >
@@ -137,8 +137,8 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Сообщение сохраняется, чтобы хозяин сервиса мог его прочитать и ответить, и удаляется
-          автоматически по истечении срока хранения. Ваш User ID видит только хозяин.
+          Сообщение сохраняется, чтобы администрация могла его прочитать и ответить, и удаляется
+          автоматически по истечении срока хранения. Ваш User ID видит только администрация.
         </p>
 
         <div className="flex flex-wrap justify-end gap-2">
@@ -151,7 +151,7 @@ export function ContactOwnerDialog({ open, onClose }: { open: boolean; onClose: 
             ) : (
               <Send className="size-4" aria-hidden="true" />
             )}
-            Отправить хозяину
+            Отправить администрации
           </Button>
         </div>
       </div>
