@@ -3,6 +3,8 @@
 import {
   ageFromBirthYear,
   birthYearFromAge,
+  COUNTRY_HINTS,
+  countryLabel,
   GENDERS,
   LANGUAGES,
   normalizePlace,
@@ -10,6 +12,7 @@ import {
   profileUpdateSchema,
   searchPreferencesSchema,
   type BlockListResponse,
+  type CountryCode,
   type Gender,
   type IncomingRequestPolicy,
   type Language,
@@ -238,6 +241,126 @@ function LanguagePicker({
 }
 
 /**
+ * One country, chosen from the closed ISO 3166-1 vocabulary.
+ *
+ * A native `<select>` rather than a free-text field, unlike the city and region above:
+ * the stored value is a two-letter code, because «Германия», "Germany" and
+ * «Deutschland» must be one value (docs/DECISIONS.md D30). The empty option means "not
+ * stated" and is saved as `null`; choosing it again is the way to withdraw the value.
+ * The names are the countries' own, so they are marked `translate="no"`.
+ */
+function CountryField({
+  id,
+  label,
+  value,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  value: CountryCode | null;
+  onChange: (value: CountryCode | null) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-sm font-medium" htmlFor={id}>
+        {label}
+      </label>
+      <select
+        id={id}
+        className="h-9 w-full rounded-lg border border-input bg-card px-2 text-sm text-foreground disabled:opacity-50"
+        value={value ?? ''}
+        onChange={(event) => {
+          const next = event.target.value;
+          onChange(next === '' ? null : next);
+        }}
+        disabled={disabled}
+      >
+        <option value="">{t('Не указана')}</option>
+        {COUNTRY_HINTS.map((country) => (
+          <option key={country.code} value={country.code} translate="no">
+            {country.native}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * The country filter: a fixed vocabulary, several values, removable chips.
+ *
+ * Same shape as `LanguagePicker` — a native select plus chips — because a country is a
+ * code from a closed list, not a typed place. A separate `CountryPicker` (rather than
+ * reusing `LanguagePicker`) keeps the two vocabularies and their labels independent.
+ */
+function CountryPicker({
+  legend,
+  selected,
+  onToggle,
+  disabled,
+}: {
+  legend: string;
+  selected: readonly CountryCode[];
+  onToggle: (value: CountryCode) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useI18n();
+  const available = COUNTRY_HINTS.filter((country) => !selected.includes(country.code));
+
+  return (
+    <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
+      <legend className="text-sm font-medium">{legend}</legend>
+
+      {selected.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {selected.map((country) => (
+            <li key={country}>
+              <button
+                type="button"
+                onClick={() => onToggle(country)}
+                aria-label={t('Убрать {value}', { value: countryLabel(country) })}
+                className={cn(chipClass(true), 'flex items-center gap-1.5')}
+              >
+                <span translate="no">{countryLabel(country)}</span>
+                <X className="size-3.5 text-muted-foreground" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">{t('Не выбрана ни одна страна.')}</p>
+      )}
+
+      <label className="sr-only" htmlFor={`${legend}-add`}>
+        {t('Добавить страну')}
+      </label>
+      <select
+        id={`${legend}-add`}
+        aria-label={t('Добавить страну')}
+        className="h-9 w-full rounded-lg border border-input bg-card px-2 text-sm text-foreground disabled:opacity-50"
+        value=""
+        disabled={disabled || available.length === 0}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next) onToggle(next);
+        }}
+      >
+        <option value="">{t('Добавить страну…')}</option>
+        {available.map((country) => (
+          <option key={country.code} value={country.code} translate="no">
+            {country.native}
+          </option>
+        ))}
+      </select>
+    </fieldset>
+  );
+}
+
+/**
  * Adds a typed place to a filter list.
  *
  * The same spelling twice is one place, compared the way the matchmaker compares it
@@ -429,6 +552,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
   const [age, setAge] = useState(
     session.profile.birthYear === null ? '' : String(ageFromBirthYear(session.profile.birthYear)),
   );
+  const [country, setCountry] = useState<CountryCode | null>(session.profile.country);
   const [city, setCity] = useState(session.profile.city ?? '');
   const [region, setRegion] = useState(session.profile.region ?? '');
   const [languages, setLanguages] = useState<Language[]>([...session.profile.languages]);
@@ -452,6 +576,7 @@ function ProfileSection({ session }: { session: SessionInfo }) {
   const draft = profileUpdateSchema.safeParse({
     gender,
     birthYear: parsedAge === null || !ageIsSane ? null : birthYearFromAge(parsedAge),
+    country,
     // An empty field means "I no longer want to say", which is `null` on the wire.
     city: city.trim() === '' ? null : city.trim(),
     region: region.trim() === '' ? null : region.trim(),
@@ -518,6 +643,14 @@ function ProfileSection({ session }: { session: SessionInfo }) {
           aria-invalid={!ageIsSane}
         />
       </div>
+
+      <CountryField
+        id="profile-country"
+        label={t('Страна')}
+        value={country}
+        onChange={setCountry}
+        disabled={save.isPending}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Combobox
@@ -592,6 +725,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
   const [ageMax, setAgeMax] = useState(boundValue(session.search.ageMax));
   const [cities, setCities] = useState<string[]>([...session.search.cities]);
   const [regions, setRegions] = useState<string[]>([...session.search.regions]);
+  const [countries, setCountries] = useState<CountryCode[]>([...session.search.countries]);
   const [languages, setLanguages] = useState<Language[]>([...session.search.languages]);
   const [relaxAllowed, setRelaxAllowed] = useState(session.search.relaxAllowed);
 
@@ -607,6 +741,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
       client.applySession(updated);
       setCities([...variables.cities]);
       setRegions([...variables.regions]);
+      setCountries([...variables.countries]);
       setCityDraft('');
       setRegionDraft('');
       useAppStore.getState().notify('success', t('Фильтры поиска сохранены.'));
@@ -619,12 +754,13 @@ function FiltersSection({ session }: { session: SessionInfo }) {
     ageMax: parseBound(ageMax),
     cities: addPendingPlace(cities, cityDraft),
     regions: addPendingPlace(regions, regionDraft),
+    countries,
     languages,
     relaxAllowed,
   });
 
   const preview = draft.success ? describeCriteria(draft.data, locale) : [];
-  const anywhere = cities.length === 0 && regions.length === 0;
+  const anywhere = cities.length === 0 && regions.length === 0 && countries.length === 0;
 
   function toggle<T>(list: readonly T[], value: T): T[] {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -692,6 +828,7 @@ function FiltersSection({ session }: { session: SessionInfo }) {
             onClick={() => {
               setCities([]);
               setRegions([]);
+              setCountries([]);
               setCityDraft('');
               setRegionDraft('');
             }}
@@ -700,9 +837,18 @@ function FiltersSection({ session }: { session: SessionInfo }) {
             {t('Любой')}
           </button>
           <span className="text-xs text-muted-foreground">
-            {anywhere ? t('Подойдёт любой город и регион.') : t('Подойдёт любой из перечисленных.')}
+            {anywhere
+              ? t('Подойдёт любая страна, город и регион.')
+              : t('Подойдёт любой из перечисленных.')}
           </span>
         </div>
+
+        <CountryPicker
+          legend={t('Страны')}
+          selected={countries}
+          onToggle={(value) => setCountries((current) => toggle(current, value))}
+          disabled={save.isPending}
+        />
 
         <PlacePicker
           id="filter-cities"

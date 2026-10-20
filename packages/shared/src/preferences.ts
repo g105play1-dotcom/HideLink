@@ -25,6 +25,7 @@
  */
 import { z } from 'zod';
 
+import { COUNTRY_HINTS, countrySchema, type CountryCode } from './countries.js';
 import { LANGUAGES, type Language } from './languages.js';
 
 // -----------------------------------------------------------------------------
@@ -88,6 +89,14 @@ export interface DeclaredProfile {
   gender: Gender | null;
   /** Year of birth, not age: an age would silently go stale. */
   birthYear: number | null;
+  /**
+   * Country of residence, as an ISO 3166-1 alpha-2 code.
+   *
+   * A closed vocabulary rather than free text, unlike the city and region below: two
+   * people can spell a city the same way, but «Германия», "Germany" and «Deutschland»
+   * need one shared value to be comparable (docs/DECISIONS.md D30).
+   */
+  country: CountryCode | null;
   city: string | null;
   region: string | null;
   languages: readonly Language[];
@@ -96,6 +105,7 @@ export interface DeclaredProfile {
 export const EMPTY_PROFILE: DeclaredProfile = {
   gender: null,
   birthYear: null,
+  country: null,
   city: null,
   region: null,
   languages: [],
@@ -109,9 +119,10 @@ export const EMPTY_PROFILE: DeclaredProfile = {
  * 2026-10-20: the row has to be the same kind of list as the other filters, a multi-select
  * of concrete places, with «Любой» as the neutral chip (docs/DECISIONS.md D27).
  *
- * So the filter names places, and the candidate's *declared* city/region is what it is
- * compared against. The searcher's own declaration no longer takes part: "искать в
- * Москве и Казани" does not depend on where the searcher lives.
+ * So the filter names places, and the candidate's *declared* country/city/region is what
+ * it is compared against. The searcher's own declaration no longer takes part: "искать в
+ * Москве и Казани" does not depend on where the searcher lives. The country is a code
+ * from a closed vocabulary (D30); the other two stay free text (D27).
  */
 export interface SearchPreferences {
   genders: readonly Gender[];
@@ -120,13 +131,22 @@ export interface SearchPreferences {
   /**
    * City names a candidate's declared city must be one of. Empty = no constraint.
    *
-   * Compared through `normalizePlace`, and the union of `cities` and `regions` is an
-   * **or**: naming both accepts a candidate who matches either. A candidate who declared
-   * nothing never satisfies a place filter — guessing would match strangers.
+   * Compared through `normalizePlace`, and the union of `cities`, `regions` and
+   * `countries` is an **or**: naming several accepts a candidate who matches any. A
+   * candidate who declared nothing never satisfies a location filter — guessing would
+   * match strangers.
    */
   cities: readonly string[];
   /** Region names, with the same rules as {@link cities}. */
   regions: readonly string[];
+  /**
+   * ISO 3166-1 alpha-2 codes a candidate's declared country must be one of.
+   *
+   * The third member of the *same* location union: naming a country, a city and a region
+   * accepts a candidate who matches any one of them. A country is a code rather than a
+   * name because the vocabulary is closed (D30); an empty list means no constraint.
+   */
+  countries: readonly CountryCode[];
   languages: readonly Language[];
   /**
    * Whether the server may drop filters, visibly, after a long wait.
@@ -143,6 +163,7 @@ export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
   ageMax: null,
   cities: [],
   regions: [],
+  countries: [],
   languages: [],
   relaxAllowed: false,
 };
@@ -187,6 +208,18 @@ const placeFilterSchema = z
   .transform((values) => normalizePlaces(values));
 
 /**
+ * The country filter.
+ *
+ * Codes are canonicalised by `countrySchema`, so `de`, ` DE ` and `DE` are one value.
+ * Duplicates are dropped by the transformed code; the list is bounded by the size of the
+ * vocabulary because a country cannot honestly appear twice.
+ */
+const countryFilterSchema = z
+  .array(countrySchema)
+  .max(COUNTRY_HINTS.length)
+  .transform((values) => [...new Set(values)]);
+
+/**
  * Year of birth. The upper bound is "this year" rather than a constant, so the schema
  * does not have to be edited every January.
  */
@@ -207,6 +240,7 @@ export const profileUpdateSchema = z
   .object({
     gender: genderSchema.nullable().optional(),
     birthYear: birthYearSchema.nullable().optional(),
+    country: countrySchema.nullable().optional(),
     city: placeSchema.nullable().optional(),
     region: placeSchema.nullable().optional(),
     languages: z.array(languageSchema).max(LANGUAGES.length).optional(),
@@ -220,6 +254,7 @@ export const searchPreferencesSchema = z
     ageMax: z.number().int().min(PROFILE_LIMITS.AGE_MIN).max(PROFILE_LIMITS.AGE_MAX).nullable(),
     cities: placeFilterSchema,
     regions: placeFilterSchema,
+    countries: countryFilterSchema,
     languages: z.array(languageSchema).max(LANGUAGES.length),
     relaxAllowed: z.boolean(),
   })
@@ -265,6 +300,7 @@ export const searchPreferencesUpdateSchema = z
       .optional(),
     cities: placeFilterSchema.optional(),
     regions: placeFilterSchema.optional(),
+    countries: countryFilterSchema.optional(),
     languages: z.array(languageSchema).max(LANGUAGES.length).optional(),
     relaxAllowed: z.boolean().optional(),
   })
@@ -391,20 +427,25 @@ export function preferencesFit(
     if (prefs.ageMax !== null && age > prefs.ageMax) return false;
   }
 
-  if (prefs.cities.length > 0 || prefs.regions.length > 0) {
-    // "One of the places I named", not "all of them": the two lists — and the names
-    // inside each — form one union, so naming Moscow and Tatarstan accepts a candidate
-    // who matches either. Declaring nothing cannot satisfy a place filter: guessing
-    // would match strangers.
+  if (prefs.cities.length > 0 || prefs.regions.length > 0 || prefs.countries.length > 0) {
+    // "One of the places I named", not "all of them": the three lists — and the values
+    // inside each — form one union, so naming Moscow, Tatarstan and Germany accepts a
+    // candidate who matches any one. Declaring nothing cannot satisfy a location filter:
+    // guessing would match strangers.
     const cities = placeSet(prefs.cities);
     const regions = placeSet(prefs.regions);
+    const countries = new Set(prefs.countries);
     const candidateCity = normalizePlace(candidate.city);
     const candidateRegion = normalizePlace(candidate.region);
+    const candidateCountry = candidate.country;
 
     const matchesCity = candidateCity !== null && cities.has(candidateCity);
     const matchesRegion = candidateRegion !== null && regions.has(candidateRegion);
+    // Codes are already canonical (the schema upper-cases and trims them), so equality
+    // is the whole comparison — no normalisation of names is possible or wanted.
+    const matchesCountry = candidateCountry !== null && countries.has(candidateCountry);
 
-    if (!matchesCity && !matchesRegion) return false;
+    if (!matchesCity && !matchesRegion && !matchesCountry) return false;
   }
 
   if (prefs.languages.length > 0) {
@@ -476,7 +517,7 @@ function criterionIsSet(prefs: SearchPreferences, criterion: RelaxableCriterion)
     case 'age':
       return prefs.ageMin !== null || prefs.ageMax !== null;
     case 'location':
-      return prefs.cities.length > 0 || prefs.regions.length > 0;
+      return prefs.cities.length > 0 || prefs.regions.length > 0 || prefs.countries.length > 0;
     case 'languages':
       return prefs.languages.length > 0;
   }
@@ -490,7 +531,7 @@ function dropCriterion(prefs: SearchPreferences, criterion: RelaxableCriterion):
     case 'age':
       return { ...prefs, ageMin: null, ageMax: null };
     case 'location':
-      return { ...prefs, cities: [], regions: [] };
+      return { ...prefs, cities: [], regions: [], countries: [] };
     case 'languages':
       return { ...prefs, languages: [] };
   }

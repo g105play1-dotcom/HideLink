@@ -15,7 +15,15 @@ const NOW = new Date('2026-10-19T00:00:00.000Z');
 const OTHER_ID = 'AL000000000001';
 
 function profile(overrides: Partial<DeclaredProfile> = {}): DeclaredProfile {
-  return { gender: null, birthYear: null, city: null, region: null, languages: [], ...overrides };
+  return {
+    gender: null,
+    birthYear: null,
+    country: null,
+    city: null,
+    region: null,
+    languages: [],
+    ...overrides,
+  };
 }
 
 function subject(publicId: string, overrides: Partial<DeclaredProfile> = {}) {

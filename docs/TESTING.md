@@ -25,11 +25,11 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 5 | **89** | pure unit |
+| `packages/shared` | 6 | **95** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 14 | **166** | 29 unit + 137 integration |
-| `tests/e2e` | 12 | **31** | browser, two independent contexts |
-| **Total** | **33** | **294** | |
+| `apps/api` | 14 | **167** | 29 unit + 138 integration |
+| `tests/e2e` | 12 | **32** | browser, two independent contexts |
+| **Total** | **34** | **302** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
 `test/unit/platform.test.ts` 3) run without a server; the eleven integration files start a **real API
@@ -42,15 +42,18 @@ under §5.
 
 ## 3. Unit suites
 
-**`packages/shared` (89)** — the rules both ends depend on, so they are tested once, here:
+**`packages/shared` (95)** — the rules both ends depend on, so they are tested once, here:
 
 - `languages.test.ts` (3) — the generated vocabulary has a name in every language, no duplicate
   codes or native names, and a widened code (`ja`) is accepted while an unknown one (`xx`) is not.
-- `preferences.test.ts` (36) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
+- `countries.test.ts` (4) — the generated country list has an ISO code and four names per entry, no
+  duplicate codes or native names, `countrySchema` canonicalises `de`/` DE ` to `DE` and refuses
+  anything outside the list, and an unknown code stays visible instead of rendering as blank.
+- `preferences.test.ts` (38) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
   folding (`Королёв` ≡ `  королев`) and the deduplication of a place list (`normalizePlaces`), the
   relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`, `relaxationStage`), and that an
-  undeclared value never satisfies a filter — including a place filter that names cities and regions
-  (an **or** across both lists, and never the searcher's own declaration).
+  undeclared value never satisfies a filter — including a location filter that names countries,
+  cities and regions (an **or** across all three lists, and never the searcher's own declaration).
 - `ids.test.ts` (18) — `generatePublicId` shape (`AL` + 12 Crockford Base32), `normalizePublicId`
   accepting look-alikes (`O`→`0`, `I`/`L`→`1`, case), `isValidPublicId` rejecting malformed input.
 - `schemas.test.ts` (19) — every Zod input contract, including the age-range `.refine`, unknown-field
@@ -84,7 +87,7 @@ Each file below runs against the live process; the descriptions are the guarante
 | `moderation.test.ts` | 11 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; the owner's report list shows the reason, note, snapshot and both User IDs, edits only the status, refuses an anonymous caller and an unknown report; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
 | `platform.test.ts` | 4 | Blocking is readable and writable only with the owner key; the session view reports the platform value to every user; switching it off refuses a new block with `BLOCKING_DISABLED` (409) while leaving old blocks listed and removable, and switching it on allows blocks again; the body must be exactly `{ blockingEnabled: boolean }`. Every test restores the policy it found |
 | `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
-| `search-filters.test.ts` | 11 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user; multi-place round-trip |
+| `search-filters.test.ts` | 12 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), a declared country code, shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown country/unknown fields rejected, profile round-trip (including country) never exposed to another user; multi-place round-trip |
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
 | `protocol.test.ts` | 10 | The nine client events are declared and each is routed to a handler |
 | `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
@@ -111,7 +114,7 @@ exactly one, non-secret, machine-independent way.
 | Spec | Tests | Focus |
 | --- | --- | --- |
 | `matching.spec.ts` | 4 | Random match and bidirectional messages; ending a chat with distinct reasons for both sides; "next" starting a clean conversation; cancelling a search with a running timer |
-| `filters.spec.ts` | 5 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI; a declared gender withdrawn by pressing it again, survived across a reload |
+| `filters.spec.ts` | 6 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities, a region and a country code round-tripping through the server; an impossible age range refused in the UI; a declared country stored as a code and withdrawn through the profile select; a declared gender withdrawn by pressing it again, survived across a reload |
 | `direct.spec.ts` | 4 | Request sent/accepted; request declined; incoming requests disabled (and the setting surviving a reload); self-request refused |
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |

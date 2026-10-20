@@ -175,6 +175,11 @@ test.describe('filtered search', () => {
 
     const cities = placeRow.getByLabel('Города', { exact: true });
     const regions = placeRow.getByLabel('Регионы', { exact: true });
+    const countries = placeRow.getByLabel('Добавить страну', { exact: true });
+
+    // A country is a code from a closed vocabulary, not typed: choosing Germany as
+    // «Deutschland» and comparing `DE` is what makes the filter unambiguous (D30).
+    await countries.selectOption('DE');
 
     await cities.fill('Москва');
     await cities.press('Enter');
@@ -189,6 +194,9 @@ test.describe('filtered search', () => {
     await expect(
       placeRow.getByRole('button', { name: 'Убрать Татарстан', exact: true }),
     ).toBeVisible();
+    await expect(
+      placeRow.getByRole('button', { name: 'Убрать Deutschland', exact: true }),
+    ).toBeVisible();
     await expect(placeRow.getByRole('button', { name: 'Любой', exact: true })).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -199,6 +207,7 @@ test.describe('filtered search', () => {
 
     // The applied filters come from the server, so this is the round trip and not the form.
     await expect(alice.page.getByText('Пол: Женский')).toBeVisible();
+    await expect(alice.page.getByText('Страны: Deutschland')).toBeVisible();
     await expect(alice.page.getByText('Города: Москва, Казань')).toBeVisible();
     await expect(alice.page.getByText('Регионы: Татарстан')).toBeVisible();
 
@@ -208,12 +217,16 @@ test.describe('filtered search', () => {
     await expect(placeRow.getByRole('button', { name: 'Убрать Москва', exact: true })).toHaveCount(
       0,
     );
+    await expect(
+      placeRow.getByRole('button', { name: 'Убрать Deutschland', exact: true }),
+    ).toHaveCount(0);
 
     await saveFilters(alice.page);
     await closeSettings(alice.page);
 
     await expect(alice.page.getByText('Без фильтров — подойдёт любой собеседник.')).toBeVisible();
     await expect(alice.page.getByText('Пол: Женский')).toHaveCount(0);
+    await expect(alice.page.getByText('Страны: Deutschland')).toHaveCount(0);
     await expect(alice.page.getByText('Города: Москва, Казань')).toHaveCount(0);
     await expect(alice.page.getByText('Регионы: Татарстан')).toHaveCount(0);
 
@@ -241,6 +254,33 @@ test.describe('filtered search', () => {
 
     await alice.page.getByLabel('Максимальный возраст', { exact: true }).fill('50');
     await expect(saveButton).toBeEnabled();
+
+    expectNoClientErrors(alice);
+  });
+
+  test('a declared country is stored as a code and can be withdrawn', async ({ browser }) => {
+    const alice = await newIdentity(browser);
+    await openSettings(alice.page);
+
+    const country = alice.page.getByLabel('Страна', { exact: true });
+
+    // The select shows the country's own name but stores its code: the same value the
+    // filter compares and the server validates (docs/DECISIONS.md D30/D33).
+    await country.selectOption('DE');
+    await saveProfile(alice.page);
+
+    await alice.page.reload();
+    await openSettings(alice.page);
+    await expect(country).toHaveValue('DE');
+
+    // The empty option is the way back to "not stated"; it must survive as `null`, not as
+    // an empty code the schema would refuse.
+    await country.selectOption('');
+    await saveProfile(alice.page);
+
+    await alice.page.reload();
+    await openSettings(alice.page);
+    await expect(country).toHaveValue('');
 
     expectNoClientErrors(alice);
   });

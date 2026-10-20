@@ -648,8 +648,9 @@ date in the file header, by `scripts/generate-vocabularies.mjs`:
   CLDR locale; `en`/`ru`/`zh` exist only to *search* the picker and are never displayed. The **code**
   is the domain value: `languageSchema` validates it, `declaredLanguages`/`prefLanguages` store it,
   matching compares it.
-- **Countries** (`apps/web/src/data/countries.ts`): the 194 UN members from mledoze/countries with
-  ISO 3166-1 alpha-2, the native common name, and en/ru/zh search aids.
+- **Countries** (`packages/shared/src/country-data.ts`, with the hand-written validation and lookup
+  in `packages/shared/src/countries.ts`): the 194 UN members from mledoze/countries with ISO 3166-1
+  alpha-2, the native common name, and en/ru/zh search aids.
 
 Generated and committed, rather than fetched at build time or installed as a package, because the
 build must not require GitHub, every dependency version here is pinned deliberately, and installing a
@@ -657,14 +658,15 @@ new package is blocked in this environment (pnpm cannot create symlinks). A gene
 source and a date is auditable; a list typed from memory is not.
 
 Widening a vocabulary is additive in the only sense that matters: the wire and the database carry the
-code, so stored rows stay valid. The language list therefore needed no migration.
+code, so stored rows stay valid. The language list therefore needed no migration; the country columns
+arrived later, as an additive migration (D33).
 
 **Consequences.** Native names are not translated — the interface language never changes «中文», and
 that is the spelling a person looking for their own language recognises. Countries are a **closed
 vocabulary**, not free text like a city: «Германия» and «Deutschland» must compare equal, and no
-normalisation can promise that. So the country code, not the typed name, will be what the profile
-stores and the filter compares; the server validates it against the same list. Until that wiring
-lands (next change), the generated country file is data with no reader.
+normalisation can promise that. So the country code, not the typed name, is what the profile stores
+and the filter compares; the server validates it against the same list (`countrySchema`), and the
+browser uses the same schema before saving. The wiring is D33.
 
 **Rejected.** A hand-written "major languages" list (wrong today for anyone whose language was
 forgotten, wrong again within a year); a free-text country field (D27's place model works for cities
@@ -803,3 +805,34 @@ chat messages on the server (it would change what the author said and break the 
 translator path); using English or Chinese keys (the source in the code is Russian, and a second
 copy would drift); a half-translated `/admin` (the owner reads Russian, and the moderation panel is
 the one place where an ambiguous label is dangerous).
+
+---
+
+## D33. A country is a third place list, and all three are one "location" filter
+
+**Context.** D30 decided the country would be a closed code vocabulary but left it unwired. D27 made
+"Где искать" a union of typed city and region names. A person who searches for Germany should not
+have to list every city, and a person who declared `DE` should remain findable when they did not
+declare a city.
+
+**Decision.** `DeclaredProfile.country: CountryCode | null` and `SearchPreferences.countries:
+readonly CountryCode[]` join the existing place model (additive migration
+`20261020130000_country_fields`). The three lists are one **or**: a candidate matches when their
+declared country is one of `countries`, **or** their declared city matches `cities`, **or** their
+declared region matches `regions`. A country filter never matches a city or region with the same
+spelling — codes and names are different domains. All three are dropped together by the single
+`location` relaxation step, because they answer one question — "where" — and dropping a country while
+keeping a city would not widen the search in any meaningful way. Empty lists mean "anywhere".
+
+**Consequences.** The profile asks for a country in a native `<select>` of the 194 native names; the
+filter is a multi-select of the same list with removable chips. Values are canonical ISO codes, so
+«Германия», "Deutschland" and `de` are one value. The server validates every write with
+`countrySchema` and drops an unreadable stored value on read, exactly as it does for place names, so a
+hand-edited row degrades to "not declared" instead of silently matching nobody. The archive's criteria
+deliberately did **not** gain a country: the owner's archive is selected from the fields its panel
+already exposes, and adding another one is a separate, owner-visible change.
+
+**Rejected.** A free-text country (D30); country as a fourth, separately relaxable criterion (a search
+could then keep the country while dropping every city, which is not the question the user answered);
+storing the native name (a future rename in the source would silently invalidate stored rows); a
+separate country-only section (one "where" question belongs in one row, next to the other two lists).

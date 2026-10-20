@@ -2,6 +2,8 @@ import {
   LANGUAGE_NAMES,
   LANGUAGES,
   ageFromBirthYear,
+  countryLabel,
+  type CountryCode,
   type DeclaredProfile,
   type Gender,
   type Language,
@@ -41,17 +43,26 @@ export const LANGUAGE_LABELS: Record<Language, string> = Object.fromEntries(
 /**
  * The place filters, as the user reads them.
  *
- * A list of names rather than a mode: «Где искать» names the cities and regions a
- * candidate has declared, and "anywhere" is the empty list, rendered as an explicit
- * «Любой» chip next to the pickers (docs/DECISIONS.md D27).
+ * A list of names rather than a mode: «Где искать» names the countries, cities and
+ * regions a candidate has declared, and "anywhere" is the empty lists, rendered as an
+ * explicit «Любой» chip next to the pickers (docs/DECISIONS.md D27/D33). Countries are
+ * codes and are shown by their native name (D30); the other two are the user's words.
  */
 export function describePlaces(
   cities: readonly string[],
   regions: readonly string[],
+  countries: readonly CountryCode[],
   locale: Locale = DEFAULT_LOCALE,
 ): string[] {
   const lines: string[] = [];
 
+  if (countries.length > 0) {
+    lines.push(
+      translate(locale, 'Страны: {value}', {
+        value: countries.map((country) => countryLabel(country)).join(', '),
+      }),
+    );
+  }
   if (cities.length > 0) {
     lines.push(translate(locale, 'Города: {value}', { value: cities.join(', ') }));
   }
@@ -65,7 +76,7 @@ export function describePlaces(
 /** How a dropped filter is named in the "searching wider" notice. */
 export const CRITERION_LABELS: Record<RelaxableCriterion, MessageKey> = {
   languages: 'язык общения',
-  location: 'город или регион',
+  location: 'город, регион или страна',
   age: 'возраст',
   genders: 'пол',
 };
@@ -155,7 +166,7 @@ export function describeCriteria(
     lines.push(translate(locale, 'Возраст: до {max}', { max: criteria.ageMax }));
   }
 
-  lines.push(...describePlaces(criteria.cities, criteria.regions, locale));
+  lines.push(...describePlaces(criteria.cities, criteria.regions, criteria.countries, locale));
 
   if (criteria.languages.length > 0) {
     lines.push(
@@ -194,7 +205,11 @@ export function describeProfile(
     );
   }
 
-  const place = [profile.city, profile.region].filter((value): value is string => Boolean(value));
+  const place = [
+    profile.country === null ? null : countryLabel(profile.country),
+    profile.city,
+    profile.region,
+  ].filter((value): value is string => Boolean(value));
   if (place.length > 0)
     lines.push(translate(locale, 'Место: {value}', { value: place.join(', ') }));
 

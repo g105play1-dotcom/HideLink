@@ -201,6 +201,20 @@ describe('filtered random search', () => {
     await started;
   });
 
+  it('matches a declared country code, and refuses a country that was not declared', async () => {
+    const seeker = await participant({ search: { countries: ['DE'] } });
+    const france = await participant({ profile: { country: 'FR' } });
+
+    await join(seeker);
+    await join(france);
+    await expectNoChat([seeker, france], 700);
+
+    const germany = await participant({ profile: { country: 'DE' } });
+    const started = expectSharedChat(seeker, germany);
+    await join(germany);
+    await started;
+  });
+
   it('requires at least one shared language when a language filter is set', async () => {
     const seeker = await participant({ search: { languages: ['ru'] } });
     const englishOnly = await participant({ profile: { languages: ['en'] } });
@@ -281,6 +295,7 @@ describe('filter and profile validation', () => {
       profile: {
         gender: 'female',
         birthYear: 1996,
+        country: 'DE',
         city: 'Москва',
         region: null,
         languages: ['ru'],
@@ -290,16 +305,19 @@ describe('filter and profile validation', () => {
         ageMin: 25,
         ageMax: 45,
         cities: ['Москва'],
+        countries: ['DE'],
         languages: ['ru'],
         relaxAllowed: true,
       },
     });
 
     expect(saved.status).toBe(200);
+    expect(saved.body.settings.profile.country).toBe('DE');
     expect(saved.body.settings.profile.city).toBe('Москва');
     expect(saved.body.settings.profile.languages).toEqual(['ru']);
     expect(saved.body.settings.search.ageMin).toBe(25);
     expect(saved.body.settings.search.cities).toEqual(['Москва']);
+    expect(saved.body.settings.search.countries).toEqual(['DE']);
     expect(saved.body.settings.search.relaxAllowed).toBe(true);
 
     // Knowing somebody's User ID must not reveal a single thing about how they describe

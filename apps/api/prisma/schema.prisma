@@ -138,6 +138,8 @@ model Identity {
   declaredGender   Gender?
   /// Year of birth, not age: an age would silently go stale.
   declaredBirthYear Int?
+  /// ISO 3166-1 alpha-2 code from the shared closed vocabulary (docs/DECISIONS.md D30).
+  declaredCountry  String? @db.VarChar(2)
   declaredCity     String? @db.VarChar(64)
   declaredRegion   String? @db.VarChar(64)
   declaredLanguages String[] @default([])
@@ -154,6 +156,11 @@ model Identity {
   prefCities   String[] @default([])
   /// Place names the candidate's declared region must be one of. Empty = anywhere.
   prefRegions  String[] @default([])
+  /// Country codes the candidate's declared country must be one of. Empty = anywhere.
+  ///
+  /// The third member of the same location union, and the only one stored as a code
+  /// rather than a typed name (docs/DECISIONS.md D30).
+  prefCountries String[] @default([])
   /// Languages the owner wants the candidate to share at least one of. Empty = no constraint.
   prefLanguages String[] @default([])
   /// Whether the server may drop filters, visibly, after a long wait. Off by default.

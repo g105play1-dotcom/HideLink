@@ -24,7 +24,15 @@ import {
 const NOW = new Date('2026-06-01T00:00:00.000Z');
 
 function profile(overrides: Partial<DeclaredProfile> = {}): DeclaredProfile {
-  return { gender: null, birthYear: null, city: null, region: null, languages: [], ...overrides };
+  return {
+    gender: null,
+    birthYear: null,
+    country: null,
+    city: null,
+    region: null,
+    languages: [],
+    ...overrides,
+  };
 }
 
 function prefs(overrides: Partial<SearchPreferences> = {}): SearchPreferences {
@@ -134,6 +142,21 @@ describe('preferencesFit', () => {
     expect(preferencesFit(tatarstan, profile({ region: 'Башкортостан' }), NOW)).toBe(false);
     // A city is not a region: the two lists are compared against different declarations.
     expect(preferencesFit(tatarstan, profile({ city: 'Татарстан' }), NOW)).toBe(false);
+  });
+
+  it('matches a country code, and treats it as one value with the city and region lists', () => {
+    const germany = prefs({ countries: ['DE'] });
+
+    expect(preferencesFit(germany, profile({ country: 'DE' }), NOW)).toBe(true);
+    expect(preferencesFit(germany, profile({ country: 'FR' }), NOW)).toBe(false);
+    // A country code is not a city or a region name, and vice versa.
+    expect(preferencesFit(germany, profile({ city: 'DE', region: 'DE' }), NOW)).toBe(false);
+    expect(preferencesFit(prefs({ cities: ['Берлин'] }), profile({ country: 'DE' }), NOW)).toBe(
+      false,
+    );
+
+    // Declaring nothing never satisfies a location filter, country included.
+    expect(preferencesFit(germany, profile(), NOW)).toBe(false);
   });
 
   it('accepts a candidate matching *either* list, because several places are one wider search', () => {
@@ -300,6 +323,7 @@ describe('schemas', () => {
       ageMax: 99,
       cities: ['Казань'],
       regions: [],
+      countries: ['DE'],
       languages: ['ru', 'en'],
       relaxAllowed: true,
     });
@@ -354,6 +378,20 @@ describe('schemas', () => {
       cities: ['Москва', 'москва ', 'Казань'],
     });
     expect(deduped.success && deduped.data.cities).toEqual(['Москва', 'Казань']);
+  });
+
+  it('canonicalises country codes, refuses unknown ones and drops duplicates', () => {
+    const deduped = searchPreferencesUpdateSchema.safeParse({
+      countries: ['de', ' DE ', 'DE'],
+    });
+    expect(deduped.success && deduped.data.countries).toEqual(['DE']);
+
+    expect(searchPreferencesUpdateSchema.safeParse({ countries: ['XX'] }).success).toBe(false);
+    expect(profileUpdateSchema.safeParse({ country: 'de' }).success).toBe(true);
+    expect(profileUpdateSchema.safeParse({ country: 'XX' }).success).toBe(false);
+    // Clearing a declared country is an explicit null, not an empty code.
+    expect(profileUpdateSchema.safeParse({ country: null }).success).toBe(true);
+    expect(profileUpdateSchema.safeParse({ country: '' }).success).toBe(false);
   });
 
   it('no longer accepts "other" as a gender', () => {

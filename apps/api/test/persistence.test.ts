@@ -321,6 +321,7 @@ describe('sessions and identities', () => {
         // Declared, voluntary, and never displayed to a peer.
         'declaredGender',
         'declaredBirthYear',
+        'declaredCountry',
         'declaredCity',
         'declaredRegion',
         'declaredLanguages',
@@ -330,6 +331,7 @@ describe('sessions and identities', () => {
         'prefAgeMax',
         'prefCities',
         'prefRegions',
+        'prefCountries',
         'prefLanguages',
         'prefRelax',
       ]),

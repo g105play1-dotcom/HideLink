@@ -14,9 +14,11 @@
  */
 import {
   INCOMING_REQUEST_POLICIES,
+  isCountryCode,
   isGender,
   isLanguage,
   normalizePlaces,
+  type CountryCode,
   type DeclaredProfile,
   type Gender,
   type IdentitySettingsView,
@@ -37,6 +39,7 @@ export interface IdentitySettingsRow {
   incomingRequests: string;
   declaredGender: string | null;
   declaredBirthYear: number | null;
+  declaredCountry: string | null;
   declaredCity: string | null;
   declaredRegion: string | null;
   declaredLanguages: readonly string[];
@@ -45,6 +48,7 @@ export interface IdentitySettingsRow {
   prefAgeMax: number | null;
   prefCities: readonly string[];
   prefRegions: readonly string[];
+  prefCountries: readonly string[];
   prefLanguages: readonly string[];
   prefRelax: boolean;
 }
@@ -54,6 +58,7 @@ export const IDENTITY_SETTINGS_SELECT = {
   incomingRequests: true,
   declaredGender: true,
   declaredBirthYear: true,
+  declaredCountry: true,
   declaredCity: true,
   declaredRegion: true,
   declaredLanguages: true,
@@ -62,6 +67,7 @@ export const IDENTITY_SETTINGS_SELECT = {
   prefAgeMax: true,
   prefCities: true,
   prefRegions: true,
+  prefCountries: true,
   prefLanguages: true,
   prefRelax: true,
 } as const satisfies Record<keyof IdentitySettingsRow, true>;
@@ -88,10 +94,35 @@ function places(values: readonly string[]): string[] {
   return normalizePlaces(values);
 }
 
+/**
+ * Country codes actually stored.
+ *
+ * A hand-edited lowercase or padded row is canonicalised, and a code outside the
+ * generated list is dropped — the same bounded fail-open as the place lists: an
+ * unreadable *filter* means "no constraint" rather than silently matching nobody.
+ */
+function countries(values: readonly string[]): CountryCode[] {
+  const result: CountryCode[] = [];
+
+  for (const value of values) {
+    const code = value.trim().toUpperCase();
+    if (isCountryCode(code) && !result.includes(code)) result.push(code);
+  }
+
+  return result;
+}
+
+function declaredCountry(value: string | null): CountryCode | null {
+  if (value === null) return null;
+  const code = value.trim().toUpperCase();
+  return isCountryCode(code) ? code : null;
+}
+
 export function toDeclaredProfile(row: IdentitySettingsRow): DeclaredProfile {
   return {
     gender: row.declaredGender !== null && isGender(row.declaredGender) ? row.declaredGender : null,
     birthYear: row.declaredBirthYear,
+    country: declaredCountry(row.declaredCountry),
     city: row.declaredCity,
     region: row.declaredRegion,
     languages: languages(row.declaredLanguages),
@@ -105,6 +136,7 @@ export function toSearchPreferences(row: IdentitySettingsRow): SearchPreferences
     ageMax: row.prefAgeMax,
     cities: places(row.prefCities),
     regions: places(row.prefRegions),
+    countries: countries(row.prefCountries),
     languages: languages(row.prefLanguages),
     relaxAllowed: row.prefRelax,
   };
@@ -142,6 +174,7 @@ export interface IdentitySettingsData {
   incomingRequests?: IncomingRequestPolicy;
   declaredGender?: Gender | null;
   declaredBirthYear?: number | null;
+  declaredCountry?: CountryCode | null;
   declaredCity?: string | null;
   declaredRegion?: string | null;
   declaredLanguages?: Language[];
@@ -150,6 +183,7 @@ export interface IdentitySettingsData {
   prefAgeMax?: number | null;
   prefCities?: string[];
   prefRegions?: string[];
+  prefCountries?: CountryCode[];
   prefLanguages?: Language[];
   prefRelax?: boolean;
 }
@@ -166,6 +200,7 @@ export function profileToColumns(profile: ProfileUpdate): IdentitySettingsData {
 
   if ('gender' in profile) data.declaredGender = profile.gender ?? null;
   if ('birthYear' in profile) data.declaredBirthYear = profile.birthYear ?? null;
+  if ('country' in profile) data.declaredCountry = profile.country ?? null;
   if ('city' in profile) data.declaredCity = profile.city ?? null;
   if ('region' in profile) data.declaredRegion = profile.region ?? null;
   if (profile.languages !== undefined) data.declaredLanguages = [...profile.languages];
@@ -181,6 +216,7 @@ export function preferencesToColumns(search: SearchPreferences): IdentitySetting
     prefAgeMax: search.ageMax,
     prefCities: [...search.cities],
     prefRegions: [...search.regions],
+    prefCountries: [...search.countries],
     prefLanguages: [...search.languages],
     prefRelax: search.relaxAllowed,
   };
