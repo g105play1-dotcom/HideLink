@@ -828,7 +828,7 @@ function ModerationSection({ session }: { session: SessionInfo }) {
   const queryClient = useQueryClient();
 
   const updateSetting = useMutation({
-    mutationFn: (patch: { incomingRequests?: IncomingRequestPolicy; blockingEnabled?: boolean }) =>
+    mutationFn: (patch: { incomingRequests?: IncomingRequestPolicy }) =>
       apiRequest<SessionView>('/me/settings', { method: 'PATCH', json: patch }),
     onSuccess: (updated) => {
       // The response nests everything under `settings`. Reading a field flat left the
@@ -838,14 +838,13 @@ function ModerationSection({ session }: { session: SessionInfo }) {
     },
   });
 
-  const blockingEnabled = session.blockingEnabled;
-
   const blocks = useQuery({
     queryKey: ['blocks'],
     queryFn: () => apiRequest<BlockListResponse>('/blocks'),
     staleTime: 10_000,
-    // Nothing to show while the feature is off — and no reason to ask.
-    enabled: blockingEnabled,
+    // Always asked, even while the platform switch is off: existing blocks stay in force
+    // and must remain removable. Hiding the list would trap a user with a block they
+    // cannot lift, which is exactly what switching a feature off must not do.
   });
 
   const unblock = useMutation({
@@ -894,87 +893,69 @@ function ModerationSection({ session }: { session: SessionInfo }) {
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t border-border pt-3">
-        <span className="text-sm font-medium">Блокировка собеседника</span>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            aria-pressed={blockingEnabled}
-            disabled={updateSetting.isPending}
-            onClick={() => updateSetting.mutate({ blockingEnabled: !blockingEnabled })}
-            className={chipClass(blockingEnabled)}
-          >
-            Блокировать собеседников
-          </button>
-          <span className="text-sm text-muted-foreground">
-            {blockingEnabled ? 'Включена' : 'Выключена'}
-          </span>
-        </div>
-        {/*
-          The honest consequence, in one sentence: switching the feature off is not the
-          same as lifting the blocks you already made, and it must not silently become
-          that. Whoever was blocked stays blocked, and turning the feature back on brings
-          the list back so it can be undone.
-        */}
-        <p className="text-xs text-muted-foreground">
-          Выключенная блокировка убирает кнопку в чате и этот список. Ранее заблокированные остаются
-          заблокированными — включите обратно, чтобы их увидеть.
+      {/*
+        The switch lives in `/admin` now (D31). What a user needs to know here is only
+        the consequence: the button is gone from chat, but nothing they blocked earlier
+        was quietly lifted.
+      */}
+      {!session.blockingEnabled ? (
+        <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+          Блокировка собеседника сейчас отключена администрацией. Ранее заблокированные остаются
+          заблокированными, и снять блокировку можно ниже.
         </p>
-      </div>
-
-      {blockingEnabled ? (
-        <div className="flex flex-col gap-3 border-t border-border pt-3">
-          <span className="text-sm font-medium">Заблокированные</span>
-
-          {blocks.isPending ? (
-            <div className="flex flex-col gap-2" aria-busy="true" aria-label="Загрузка списка">
-              <Skeleton className="h-11 w-full" />
-              <Skeleton className="h-11 w-full" />
-            </div>
-          ) : null}
-
-          {blocks.isError ? (
-            <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
-              <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-              {describeError(blocks.error)}
-            </p>
-          ) : null}
-
-          {blocks.isSuccess && blocks.data.blocks.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Список пуст.</p>
-          ) : null}
-
-          {blocks.data?.blocks.map((block) => (
-            <div
-              key={block.publicId}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-2.5"
-            >
-              <code translate="no" className="font-mono text-sm">
-                {block.publicId}
-              </code>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={unblock.isPending}
-                onClick={() => unblock.mutate(block.publicId)}
-              >
-                {unblock.isPending && unblock.variables === block.publicId ? (
-                  <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <Ban className="size-4" aria-hidden="true" />
-                )}
-                Разблокировать
-              </Button>
-            </div>
-          ))}
-
-          {unblock.isError ? (
-            <p className="text-sm text-destructive" role="alert">
-              {describeError(unblock.error)}
-            </p>
-          ) : null}
-        </div>
       ) : null}
+
+      <div className="flex flex-col gap-3 border-t border-border pt-3">
+        <span className="text-sm font-medium">Заблокированные</span>
+
+        {blocks.isPending ? (
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label="Загрузка списка">
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-11 w-full" />
+          </div>
+        ) : null}
+
+        {blocks.isError ? (
+          <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+            <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
+            {describeError(blocks.error)}
+          </p>
+        ) : null}
+
+        {blocks.isSuccess && blocks.data.blocks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Список пуст.</p>
+        ) : null}
+
+        {blocks.data?.blocks.map((block) => (
+          <div
+            key={block.publicId}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-2.5"
+          >
+            <code translate="no" className="font-mono text-sm">
+              {block.publicId}
+            </code>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={unblock.isPending}
+              onClick={() => unblock.mutate(block.publicId)}
+            >
+              {unblock.isPending && unblock.variables === block.publicId ? (
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Ban className="size-4" aria-hidden="true" />
+              )}
+              Разблокировать
+            </Button>
+          </div>
+        ))}
+
+        {unblock.isError ? (
+          <p className="text-sm text-destructive" role="alert">
+            {describeError(unblock.error)}
+          </p>
+        ) : null}
+      </div>
 
       {updateSetting.isError ? (
         <p className="text-sm text-destructive" role="alert">

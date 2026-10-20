@@ -17,8 +17,9 @@ not.
 | **G. Social and protection** | Blocks, reports, voluntary contact disclosure | **Partially done.** Blocks and reports are complete; "friends/contacts" is not implemented. No contact is ever disclosed automatically. |
 | **H. Stabilisation** | Tests, lint, types, build, documentation, compliance table | **Done for the scope above**, with the explicit gaps listed below. |
 | **I. Growth preparation** | Redis seam, media seam, monetisation readiness, deployment sketch | **Partly done, on purpose.** Seams and documentation exist; no second instance, no media, no ads, no payments. |
-| **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is verified by hand only. |
+| **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is covered by `admin.spec.ts`. |
 | **K. Contact the owner** | A form with subsections (жалобы, предложения, реклама, сотрудничество, …) writing into an owner-only inbox with a retention deadline (owner request 2026-10-19) | **Done.** `DECISIONS.md` D26, `SECURITY.md` §13.1, `owner-messages.test.ts`, `contact-owner.spec.ts`; the inbox is rendered on the same `/admin` page as the archive. |
+| **L. Moderation** | Reports readable and actionable by the owner; blocking is a platform switch, **off** by default (owner request 2026-10-20) | **Panel done, accounts not.** `DECISIONS.md` D31, `SECURITY.md` §13.2, `platform.test.ts`, `moderation.test.ts`, `moderation.spec.ts`. No moderator accounts and no ban endpoint yet; the shared key means no per-person audit. |
 
 ## Verified by automation
 
@@ -33,7 +34,7 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 | Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it, and the archive already has inert `storeMedia`/`mediaKind` fields waiting for it) |
 | Contacts / friends list | Brief allows it only after the core chat is solid; nothing in the MVP creates permanent links | A permission model, request/accept flow, and a privacy decision about what a "contact" reveals |
 | Chat archive *encryption and audit* | The archive itself is built (D21); protecting it further is separate work | Encryption at rest (a volume or a key outside the process), an audit trail of owner actions, and a rehearsed restore that treats transcripts as the sensitive asset |
-| Moderation console | Reports are the only signal, and only the owner can read the archive | A triage workflow over `Report` + `SecurityEvent`; note the existing `/admin` page is *not* it — it cannot ban or act on a report |
+| Moderation *accounts* and ban action | The report panel and the platform switch exist (D31), but a second person with the key would be indistinguishable from the owner | A moderator account model, per-person audit trail and a guarded ban endpoint; the panel is already the place they would live |
 | Ads / Premium | Brief forbids fake monetisation; core chat comes first | Real entitlements enforced server-side |
 | Redis-backed queue, multiple instances | No measured need; the seam is documented | Shared queue + presence, sticky sessions or a cross-process event bus, load tests first |
 | Load/soak testing, monitoring, backups | Requires a target environment; not possible to claim from localhost | A deployment, an observability stack, and a restore rehearsal |
@@ -47,7 +48,8 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
    `CORS_ORIGINS`, secrets outside the repository, `ADMIN_TOKEN` generated (only if the archive is
    used) and `ABUSE_HASH_SALT` decided on purpose.
 3. **Operate it**: database backups with a rehearsed restore, log retention, uptime and error
-   alerting, and a documented way to handle a report.
+   alerting, and a documented way to handle a report — the `/admin` moderation panel now provides the
+   reading and status-changing half; the reply to the reporter is still manual.
 4. **Measure before scaling**: a load test that establishes how many concurrent chats one process
    holds, then decide whether Redis (D5) is needed.
 5. **Then** pick up a feature from the deferred list, starting with contacts/friends, which is the

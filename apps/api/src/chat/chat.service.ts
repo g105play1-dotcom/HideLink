@@ -20,6 +20,7 @@ import { log } from '../common/logger.js';
 import { sanitizeMessageText } from '../common/sanitize.js';
 import { DirectoryService, type IdentityFacts } from '../directory/directory.service.js';
 import { ModerationService } from '../moderation/moderation.service.js';
+import { PlatformService } from '../platform/platform.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PresenceService } from '../presence/presence.service.js';
 import { AppEventBus, type ChatEndReasonSource } from '../events/app-events.js';
@@ -85,6 +86,7 @@ export class ChatService implements OnApplicationShutdown {
     private readonly presence: PresenceService,
     private readonly moderation: ModerationService,
     private readonly archive: ArchiveService,
+    private readonly platform: PlatformService,
     private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -442,7 +444,7 @@ export class ChatService implements OnApplicationShutdown {
 
   /** Blocks the peer of the chat the caller is in, ending the chat as a side effect. */
   async blockPeerOfChat(blockerId: string, chatId: string): Promise<{ publicId: string }> {
-    await this.assertBlockingAllowed(blockerId);
+    this.assertBlockingAllowed();
 
     const chat = this.registry.get(chatId);
     if (!chat) throw new AppError(ErrorCode.CHAT_NOT_FOUND);
@@ -474,7 +476,7 @@ export class ChatService implements OnApplicationShutdown {
 
   /** Blocks a User ID outside of a chat (e.g. after a declined invitation). */
   async blockByPublicId(blockerId: string, publicId: string): Promise<{ publicId: string }> {
-    await this.assertBlockingAllowed(blockerId);
+    this.assertBlockingAllowed();
     await this.directory.ensureLoaded(blockerId);
     const facts = this.requireFacts(blockerId);
 
@@ -510,19 +512,18 @@ export class ChatService implements OnApplicationShutdown {
   }
 
   /**
-   * Refuses to create a block when the user has switched the feature off.
+   * Refuses to create a block when the administration has switched the action off.
    *
    * Checked on the server, not only by hiding the button: a tab that was left open
-   * before the setting changed would otherwise still be able to block, and the setting
-   * would be decoration (AGENTS §1: the server is the authority).
+   * before the owner changed the policy would otherwise still be able to block, and the
+   * policy would be decoration (AGENTS §1: the server is the authority).
    *
-   * Deliberately only guards *creating* a block. Unblocking stays possible in both
-   * directions — wanting the feature off must never trap the user with a block they
-   * cannot remove, and this method is not called on the unblock path.
+   * Deliberately only guards *creating* a block. Unblocking stays possible —
+   * withdrawing a policy must never trap a user with a block they cannot remove — so this
+   * method is not called on the unblock path, and the block list stays readable.
    */
-  private async assertBlockingAllowed(blockerId: string): Promise<void> {
-    await this.directory.ensureLoaded(blockerId);
-    if (!this.directory.blockingAllowed(blockerId)) {
+  private assertBlockingAllowed(): void {
+    if (!this.platform.blockingEnabled()) {
       throw new AppError(ErrorCode.BLOCKING_DISABLED);
     }
   }

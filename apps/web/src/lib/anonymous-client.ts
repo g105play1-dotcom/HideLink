@@ -272,12 +272,22 @@ class AnonymousClient {
 
   /** Reports the current chat. Reporting also ends it, server-side. */
   async reportCurrentChat(reason: ReportReason, details?: string): Promise<CommandOutcome> {
-    const chatId = useAppStore.getState().chat?.chatId;
+    const state = useAppStore.getState();
+    const chatId = state.chat?.chatId;
     if (!chatId) return this.failWith('Чат не найден.');
+
+    // The dialog promises that the last message is kept as evidence, and the server only
+    // snapshots a message it is *told* about, from its own in-memory copy. Without this id
+    // every report filed through the interface stored no text at all — the owner's panel
+    // would show a complaint with nothing to review. The id is the server's; a client
+    // cannot use it to point at another chat (the server checks membership and looks the
+    // message up inside this conversation only).
+    const lastMessageId = state.messages.findLast((message) => message.messageId)?.messageId;
 
     const result = await this.command<ReportResult>('report:send', {
       chatId,
       reason,
+      ...(lastMessageId ? { messageId: lastMessageId } : {}),
       ...(details ? { details } : {}),
     });
     return result.ok ? { ok: true } : this.failed(result.error);
@@ -469,7 +479,8 @@ class AnonymousClient {
       publicId: payload.publicId,
       createdAt: payload.identityCreatedAt,
       incomingRequests: payload.settings.incomingRequests,
-      blockingEnabled: payload.settings.blockingEnabled,
+      // Platform policy, not this user's setting (D31): the same answer for everybody.
+      blockingEnabled: payload.blockingEnabled,
       profile: payload.settings.profile,
       search: payload.settings.search,
     });
@@ -615,7 +626,7 @@ class AnonymousClient {
       publicId: session.publicId,
       createdAt: session.createdAt,
       incomingRequests: session.settings.incomingRequests,
-      blockingEnabled: session.settings.blockingEnabled,
+      blockingEnabled: session.blockingEnabled,
       profile: session.settings.profile,
       search: session.settings.search,
     };

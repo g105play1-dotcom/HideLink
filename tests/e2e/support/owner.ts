@@ -90,6 +90,20 @@ async function ownerApi(path: string, init: RequestInit = {}): Promise<void> {
   }
 }
 
+/**
+ * Sets the platform-wide blocking policy.
+ *
+ * Used by the stack fixture (most specs test blocking mechanics, not the shipped default)
+ * and by the moderation spec's teardown. Goes straight to the API: a cleanup that depends
+ * on the interface under test is not a cleanup.
+ */
+export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
+  await ownerApi('/admin/platform', {
+    method: 'PUT',
+    body: JSON.stringify({ blockingEnabled }),
+  });
+}
+
 /** Puts the archive back to the shipped default: switched off, and empty. */
 export async function resetArchive(): Promise<void> {
   await ownerApi('/admin/policy', {

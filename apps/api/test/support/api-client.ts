@@ -7,7 +7,7 @@ import type {
 } from '@anonlink/protocol';
 import { io, type Socket } from 'socket.io-client';
 
-import { TEST_API_BASE, TEST_API_URL } from './test-env.js';
+import { TEST_API_BASE, TEST_API_URL, TEST_ENV } from './test-env.js';
 
 /**
  * Test doubles for the two real clients of the API.
@@ -81,6 +81,59 @@ export async function createIdentity(): Promise<TestIdentity> {
   if (!cookie) throw new Error('POST /session did not set a session cookie.');
 
   return { publicId: result.body.publicId, cookie: cookie.split(';')[0] ?? '' };
+}
+
+const ADMIN_COOKIE_NAME = 'anonlink_admin';
+
+/**
+ * Signs in as the owner, exactly as the browser does, and returns the cookie header.
+ *
+ * The tests need the owner's surface for two reasons: the platform policy (which is the
+ * only way to enable blocking, since D31) and the report list. Using the real session
+ * endpoint rather than a helper header keeps the tests honest about the credential that
+ * actually guards those routes.
+ */
+export async function adminCookie(): Promise<string> {
+  const result = await http('/admin/session', {
+    method: 'POST',
+    body: { token: TEST_ENV.ADMIN_TOKEN },
+  });
+
+  // The owner session endpoint answers 204 with only a `Set-Cookie` header.
+  if (result.status !== 200 && result.status !== 201 && result.status !== 204) {
+    throw new Error(`POST /admin/session failed: ${result.status} ${JSON.stringify(result.body)}`);
+  }
+
+  const cookie = result.setCookie.find((value) => value.startsWith(ADMIN_COOKIE_NAME));
+  if (!cookie) throw new Error('POST /admin/session did not set an admin cookie.');
+
+  return cookie.split(';')[0] ?? '';
+}
+
+/** Calls an owner-only route with a fresh admin session. */
+export async function adminHttp<T = unknown>(
+  path: string,
+  options: Omit<HttpOptions, 'cookie'> = {},
+): Promise<HttpResult<T>> {
+  return http<T>(path, { ...options, cookie: await adminCookie() });
+}
+
+/**
+ * Sets the platform-wide blocking policy and fails loudly if the owner route rejects it.
+ *
+ * Every suite that creates a block needs this: the shipped default is **off** (the owner
+ * asked for that on 2026-10-20), so a test that forgets it would fail with
+ * `BLOCKING_DISABLED` and look like a regression in blocking itself.
+ */
+export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
+  const result = await adminHttp('/admin/platform', {
+    method: 'PUT',
+    body: { blockingEnabled },
+  });
+
+  if (result.status !== 200) {
+    throw new Error(`PUT /admin/platform failed: ${result.status} ${JSON.stringify(result.body)}`);
+  }
 }
 
 type RealtimeSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

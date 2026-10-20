@@ -414,6 +414,11 @@ image); building an ad server now; putting a slot anywhere a message is drawn.
 
 ## D24. Blocking is an optional feature, and switching it off is not an amnesty
 
+> **Superseded by D31** (2026-10-20): the owner moved this switch out of the user's settings into
+> `/admin`, made it a platform policy that ships **off**, and kept the "not an amnesty" rule. The
+> reasoning below about refusing new blocks while leaving old ones removable still holds; the
+> per-user ownership and the `Identity.blockingEnabled` reader do not.
+
 **Context.** The owner asked for the block function to be optional: with it switched on, the chat
 button and the blocked list exist; with it off, neither the button nor the list should be needed. He
 also asked for the feature to be switchable by the user.
@@ -667,3 +672,71 @@ because both people can spell them, not for countries with several native names)
 build (a build that needs the network fails offline); `countries-list` or `country-state-city` as a
 dependency (a dependency for data we can generate once, and the second one drags in every city on
 earth).
+
+---
+
+## D31. Moderation belongs to the administration: blocking is a platform switch, and reports are read in `/admin`
+
+**Context.** The owner asked (2026-10-20) for the blocking switch to move out of the user's settings
+into his admin panel, for it to be **off by default**, and for a moderation panel to be created —
+users already filed reports, but nothing in the product could read them. He also said that real
+moderator accounts are not needed yet. D24 had made blocking a personal preference, which in
+retrospect gave an anonymous user a moderation capability and gave the owner no way to decide what
+his own platform offered.
+
+**Decision.**
+
+1. **One platform policy row.** `PlatformPolicy` (migration `20261020120000_platform_policy`) holds
+   the installation-wide switches, one row with the fixed id `default`. A missing row means the
+   shipped defaults, so a fresh installation needs no seed. The first switch is
+   `blockingEnabled Boolean @default(false)` — **off** until the owner turns it on.
+2. **The owner controls it.** `GET/PUT /api/v1/admin/platform` are behind `AdminGuard`, validated by
+   the shared `.strict()` `adminPlatformSchema`. `PlatformService` loads the row at boot, answers
+   synchronously from a cached copy (the chat domain's critical section cannot await a query), and
+   replaces the cache on every successful write.
+3. **The server enforces it.** `ChatService.assertBlockingAllowed` consults `PlatformService` and
+   refuses a *new* block with `ErrorCode.BLOCKING_DISABLED` (409), both for `block:peer` and for
+   `POST /blocks`. The check is absent from the unblock path and from `GET /blocks`: switching the
+   action off is not an amnesty, and it must never trap anyone with a block they cannot lift. The
+   settings screen keeps showing the blocked list (with a line explaining that administration
+   switched blocking off) precisely so it stays undoable.
+4. **The wire follows the owner, not the user.** `SessionView` and `SessionReadyPayload` carry
+   `blockingEnabled` at the top level, next to `settings`, because it is not a setting.
+   `settingsUpdateSchema` no longer accepts it; a `PATCH /me/settings` that still tries is rejected
+   with `INVALID_INPUT` rather than silently ignored. `Identity.blockingEnabled` stays in the schema
+   (migrations are additive) but is no longer selected, read or written; users' old choices have no
+   meaning under the new policy, and the column is documented as legacy.
+5. **The moderation panel is the reports screen.** `GET /admin/reports?limit=` returns non-expired
+   reports newest first (expired rows are filtered even before the sweep deletes them), and
+   `PATCH /admin/reports/:id` edits **only** the status: `open`, `reviewed`, `actioned`,
+   `dismissed`. Reason, text, participants and the server's message snapshot are evidence; rewriting
+   them would make the record disagree with what the reporter sent. Both routes sit on the existing
+   `AdminController`, next to the archive and the inbox, because the owner's key opens one surface.
+   The panel shows the reason, the reporter's note, the snapshot, both User IDs and the retention
+   date, and lets the owner move a report through the statuses.
+6. **The report actually carries its evidence.** Writing the panel exposed a defect: the dialog
+   promised that "the last message is kept", but `reportCurrentChat` never sent a `messageId`, so
+   every report filed through the interface stored no snapshot at all. The client now sends the id
+   of the latest message it holds; the server still looks that id up inside the reported chat and
+   copies the text from its own memory, so a hostile client cannot point the snapshot at anything
+   else.
+
+**Consequences.** The default is now "blocking off", which is what the owner asked for; tests that
+exercise the mechanics of blocking enable it through the owner route in the fixture (integration
+`test/global-setup.ts`, E2E `global-setup.ts`), and `test/unit/platform.test.ts` proves the shipped
+fallback is `false`. A tab left open across the switch keeps drawing the button until it reloads, but
+the API refuses, which is the same "interface hides, server enforces" split as elsewhere. No
+moderator accounts exist: the single shared `ADMIN_TOKEN` means the panel cannot attribute an action
+to a person, so every status change is the owner's own. `docs/ROADMAP.md` records that gap; adding
+roles is a new decision, not a side effect of this screen. Reports are still deleted only by the
+retention sweep — the panel deliberately offers no delete button, because the record is the evidence.
+
+**Rejected.** Keeping the switch per user (D24's shape: an anonymous person granting themselves a
+moderation action, and no way for the owner to set a platform default); an environment variable
+(it would need a restart and would not be visible where the reports are); a UI-only rule (a stale
+tab would still block); deleting a block when the policy is switched off (an amnesty nobody asked
+for); editing report evidence from the panel (the record must stay what the reporter sent); a
+separate module and controller for moderation (the owner surface is already one guarded class, and
+splitting it would duplicate the guard wiring without adding a boundary); building moderator
+accounts now (the owner explicitly deferred them, and a fake role without an audit trail would be
+worse than none).

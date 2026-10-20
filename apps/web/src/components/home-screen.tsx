@@ -123,9 +123,11 @@ export function HomeScreen() {
               {inChat && chat ? (
                 <ChatPanel
                   chat={chat}
-                  // The block action is a choice the user makes in their settings: with it
-                  // switched off, the button is not offered at all (docs/DECISIONS.md D24).
-                  canBlock={session?.blockingEnabled ?? true}
+                  // The block action is the administration's decision, not the user's: with
+                  // the platform policy off, the button is not offered at all (D31). While
+                  // the session is still loading there is no chat either, so `false` is the
+                  // safe default and matches what the server would answer.
+                  canBlock={session?.blockingEnabled ?? false}
                   onReport={() => setReporting(true)}
                   onBlock={() => setBlocking(true)}
                 />

@@ -81,6 +81,14 @@ export interface SessionReadyPayload {
   protocolVersion: number;
   publicId: string;
   identityCreatedAt: string;
+  /**
+   * Whether the platform offers the "block a peer" action at all.
+   *
+   * A platform policy (D31), repeated on the socket handshake so a reconnecting tab does
+   * not have to ask REST again. The client uses it only to hide the button; the server
+   * refuses the action regardless.
+   */
+  blockingEnabled: boolean;
   settings: IdentitySettings;
   /**
    * Effective server limits.

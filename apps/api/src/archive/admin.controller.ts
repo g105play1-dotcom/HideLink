@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -16,11 +17,22 @@ import {
   archivePolicySchema,
   adminConfirmSchema,
   adminIdentityQuerySchema,
+  adminPlatformSchema,
+  adminReportListQuerySchema,
+  adminReportParamsSchema,
+  adminReportUpdateSchema,
   ownerMessageListQuerySchema,
   ownerMessageParamsSchema,
   type AdminConfirmInput,
   type AdminIdentityListResponse,
   type AdminIdentityQuery,
+  type AdminPlatformInput,
+  type AdminPlatformView,
+  type AdminReportListQuery,
+  type AdminReportListResponse,
+  type AdminReportParams,
+  type AdminReportUpdateInput,
+  type AdminReportView,
   type ArchiveDeletionResponse,
   type ArchiveListQuery,
   type ArchiveListResponse,
@@ -37,9 +49,14 @@ import {
 import { AppError } from '../common/app-error.js';
 import { zodBody, zodParam, zodQuery } from '../common/zod-validation.pipe.js';
 import { Anonymous } from '../identity/request-context.js';
+import { ModerationService } from '../moderation/moderation.service.js';
 import { OwnerMessageService } from '../owner/owner.service.js';
+import { PlatformService } from '../platform/platform.service.js';
 import { AdminGuard } from './admin.guard.js';
 import { ArchiveService } from './archive.service.js';
+
+/** How many reports the owner's screen shows in one answer. */
+const REPORT_LIST_LIMIT = 100;
 
 /**
  * The owner's archive surface.
@@ -56,7 +73,55 @@ export class AdminController {
   constructor(
     private readonly archive: ArchiveService,
     private readonly inbox: OwnerMessageService,
+    private readonly platform: PlatformService,
+    private readonly moderation: ModerationService,
   ) {}
+
+  // ---------------------------------------------------------------------------
+  // Platform policy — what the administration allows at all
+  // ---------------------------------------------------------------------------
+
+  /** The switches currently in force, with the shipped defaults filled in. */
+  @Get('platform')
+  platformPolicy(): AdminPlatformView {
+    return this.platform.current();
+  }
+
+  /** Replaces the switches. Takes effect immediately for every user. */
+  @Put('platform')
+  async setPlatform(
+    @Body(zodBody(adminPlatformSchema)) body: AdminPlatformInput,
+  ): Promise<AdminPlatformView> {
+    return this.platform.set(body);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Reports — the other half of moderation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Abuse reports inside their retention window, newest first.
+   *
+   * Until this route existed the reports were written and never read: a complaint ended
+   * the chat and then sat in a table nobody could open. The owner asked for the panel.
+   */
+  @Get('reports')
+  async reports(
+    @Query(zodQuery(adminReportListQuerySchema)) query: AdminReportListQuery,
+  ): Promise<AdminReportListResponse> {
+    return { reports: await this.moderation.listReports(query.limit ?? REPORT_LIST_LIMIT) };
+  }
+
+  /** Records the owner's decision about one report. Status is the only editable field. */
+  @Patch('reports/:id')
+  async updateReport(
+    @Param(zodParam(adminReportParamsSchema)) params: AdminReportParams,
+    @Body(zodBody(adminReportUpdateSchema)) body: AdminReportUpdateInput,
+  ): Promise<AdminReportView> {
+    const updated = await this.moderation.setReportStatus(params.id, body.status);
+    if (!updated) throw new AppError(ErrorCode.REPORT_NOT_FOUND);
+    return updated;
+  }
 
   /** The policy in force, including who it currently covers. */
   @Get('policy')

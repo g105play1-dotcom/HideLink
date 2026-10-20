@@ -27,16 +27,16 @@ the E2E package used to answer to `test`).
 | --- | --- | --- | --- |
 | `packages/shared` | 5 | **89** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 12 | **159** | 26 unit + 133 integration |
-| `tests/e2e` | 9 | **27** | browser, two independent contexts |
-| **Total** | **27** | **283** | |
+| `apps/api` | 14 | **166** | 29 unit + 137 integration |
+| `tests/e2e` | 10 | **29** | browser, two independent contexts |
+| **Total** | **30** | **292** | |
 
-`apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
-without a server; the ten integration files start a **real API process on port 3101** against the
-`*_test` database.
+`apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
+`test/unit/platform.test.ts` 3) run without a server; the eleven integration files start a **real API
+process on port 3101** against the `*_test` database.
 
 **Last full run (2026-10-20, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `27 passed (2.3m)`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `29 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
@@ -64,10 +64,12 @@ under §5.
 **`packages/protocol` (8)** — `PROTOCOL_VERSION` and the exact client/server event-name maps, so a
 renamed event cannot silently ship.
 
-**`apps/api/test/unit` (26)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
+**`apps/api/test/unit` (29)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
 'peer'`, dedup by `clientMessageId` scoped per sender, bounded history, `endedReasonFor`
-asymmetries) and the token-bucket limiter (`rate-limit`: burst, continuous refill, per-key
-independence, idle-key eviction, bounded key budget).
+asymmetries), the token-bucket limiter (`rate-limit`: burst, continuous refill, per-key
+independence, idle-key eviction, bounded key budget) and the platform policy default (`platform`:
+the cached value starts `false`, a missing `PlatformPolicy` row means `false` after a reload, and a
+stored `true` is adopted).
 
 ## 4. Integration suites (`apps/api/test`, real server + database)
 
@@ -75,13 +77,14 @@ Each file below runs against the live process; the descriptions are the guarante
 
 | File | Tests | What it guarantees |
 | --- | --- | --- |
-| `rest.test.ts` | 36 | Session lifecycle (HttpOnly cookie, hash-only storage, idempotency, forged cookie → new identity, rotation on `DELETE`), `GET /users/:publicId` never disclosing presence/ban/age, settings validation, blocks (idempotent, self-block refused, no third-party leak), security headers, error-shape consistency, and the **CORS preflight allows every method the REST surface uses** (the list is enforced by the browser, not the server — a method missing from it makes a route fail with `net::ERR_FAILED` and no server log line) |
+| `rest.test.ts` | 37 | Session lifecycle (HttpOnly cookie, hash-only storage, idempotency, forged cookie → new identity, rotation on `DELETE`), `GET /users/:publicId` never disclosing presence/ban/age, settings validation (including the refusal of the retired per-user `blockingEnabled` field), blocks (idempotent, self-block refused, no third-party leak), security headers, error-shape consistency, and the **CORS preflight allows every method the REST surface uses** (the list is enforced by the browser, not the server — a method missing from it makes a route fail with `net::ERR_FAILED` and no server log line) |
 | `chat.test.ts` | 13 | Bidirectional delivery with per-recipient labels, ordering, length limits (exact-limit ok, over-limit refused), empty refused, `clientMessageId` dedup, non-participant refused, end-for-both, `chat:next`, reconnect within grace, end after grace, second tab isolation |
 | `matching.test.ts` | 8 | Two waiters paired into one chat, **no identity in two chats at once**, never matching itself from two sockets, peer User ID never leaked, cancel removes from queue, re-match after leave, disconnected identity dropped, unknown event answered |
 | `direct.test.ts` | 15 | Direct request delivery (sender ID disclosed because it is reciprocal), note length, unknown/self/malformed target, offline target, requests-off target, **blocked target refused without saying so**, blocked while in a chat, cancel on disconnect; accept (both IDs revealed), decline, wrong addressee, double answer, second-chat refusal |
-| `moderation.test.ts` | 9 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
+| `moderation.test.ts` | 11 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; the owner's report list shows the reason, note, snapshot and both User IDs, edits only the status, refuses an anonymous caller and an unknown report; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
+| `platform.test.ts` | 4 | Blocking is readable and writable only with the owner key; the session view reports the platform value to every user; switching it off refuses a new block with `BLOCKING_DISABLED` (409) while leaving old blocks listed and removable, and switching it on allows blocks again; the body must be exactly `{ blockingEnabled: boolean }`. Every test restores the policy it found |
 | `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
-| `search-filters.test.ts` | 10 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user |
+| `search-filters.test.ts` | 11 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user; multi-place round-trip |
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
 | `protocol.test.ts` | 10 | The nine client events are declared and each is routed to a handler |
 | `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
@@ -107,13 +110,14 @@ exactly one, non-secret, machine-independent way.
 | Spec | Tests | Focus |
 | --- | --- | --- |
 | `matching.spec.ts` | 4 | Random match and bidirectional messages; ending a chat with distinct reasons for both sides; "next" starting a clean conversation; cancelling a search with a running timer |
-| `filters.spec.ts` | 4 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI; a declared gender withdrawn by pressing it again, survived across a reload |
+| `filters.spec.ts` | 5 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI; a declared gender withdrawn by pressing it again, survived across a reload |
 | `direct.spec.ts` | 4 | Request sent/accepted; request declined; incoming requests disabled (and the setting surviving a reload); self-request refused |
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
 | `admin.spec.ts` | 3 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept |
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
+| `moderation.spec.ts` | 2 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
 
 `admin.spec.ts` is the newest, and it was written *after* the fact rather than before it. Using the
@@ -172,9 +176,11 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
    most valuable missing test. The archive is the one exception: `archive.test.ts` backdates an archive
    and calls `POST /admin/archives/delete-expired`, which runs the same `deleteExpired()` the sweep
    runs — so the *query* is proved, though not the timer. COMPLIANCE §5.7 is marked accordingly.
-2. **Block/report in a browser.** The behaviour is enforced server-side and covered by integration
-   tests, but no E2E journey clicks "Заблокировать"/"Пожаловаться" and then verifies the peer's
-   screen. Only the negative (third party refused) is exercised in the browser.
+2. **Block/report in a browser.** The report journey is now covered end to end
+   (`moderation.spec.ts`: a user reports, the owner reads the snapshot and changes the status), but
+   nothing clicks «Заблокировать» through the interface and then verifies the peer's screen, and no
+   browser test asserts what the *reporter's peer* sees at the moment the chat ends. Blocking is
+   exercised in the browser only as a refusal of a third party (`access.spec.ts`).
 3. **Only Chromium.** No Firefox, no WebKit, no mobile viewport.
 4. **No accessibility audit.** ARIA roles are used and relied upon as locators, but there is no axe
    run, no keyboard-only pass, no screen-reader check.
@@ -197,13 +203,16 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
 13. **Web has no unit tests.** The Zustand store and the client state machine (`anonymous-client.ts`)
     are exercised only through E2E; there is no isolated test of their transitions.
 14. **The owner's `/admin` page is covered in a browser, partly.** `admin.spec.ts` drives the whole
-    journey — key, policy, recording, reading a transcript, deleting — but the `criteria` and
-    `selected` audiences are only exercised at the API level (`archive.test.ts`); no browser test
-    picks a person by search. The page also has no coverage of its own error paths beyond a wrong key,
-    and no accessibility audit (see item 4). Writing this spec was itself the response to two defects
-    that using the page by hand had found: `PUT` was missing from the CORS method list (so "Сохранить"
-    failed with `net::ERR_FAILED` while every server-side test passed) and the key was demanded again
-    after a reload although the cookie was still valid. `admin.spec.ts` now fails if either returns.
+    archive journey — key, policy, recording, reading a transcript, deleting — and `moderation.spec.ts`
+    drives the platform switch and the report status, but the `criteria` and `selected` audiences are
+    only exercised at the API level (`archive.test.ts`); no browser test picks a person by search. The
+    page also has no coverage of its own error paths beyond a wrong key, and no accessibility audit
+    (see item 4). Writing `admin.spec.ts` was itself the response to two defects that using the page by
+    hand had found: `PUT` was missing from the CORS method list (so "Сохранить" failed with
+    `net::ERR_FAILED` while every server-side test passed) and the key was demanded again after a
+    reload although the cookie was still valid. `admin.spec.ts` now fails if either returns. Writing
+    `moderation.spec.ts` found a third: the report dialog promised to keep the last message, but the
+    client never sent a `messageId`, so every report filed through the interface stored no text.
 
 ## 7. Reading a failure
 

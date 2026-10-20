@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { ModerationModule } from '../moderation/moderation.module.js';
 import { OwnerModule } from '../owner/owner.module.js';
 import { AdminGuard } from './admin.guard.js';
 import { AdminSessionController } from './admin-session.controller.js';
@@ -19,7 +20,7 @@ import { ArchiveService } from './archive.service.js';
  * two. The inbox does not know about archives, so this stays acyclic.
  */
 @Module({
-  imports: [OwnerModule],
+  imports: [OwnerModule, ModerationModule],
   controllers: [AdminSessionController, AdminController],
   providers: [ArchiveService, AdminGuard],
   exports: [ArchiveService],

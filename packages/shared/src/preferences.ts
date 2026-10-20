@@ -270,19 +270,16 @@ export const searchPreferencesUpdateSchema = z
   })
   .strict();
 
-/** The `PATCH /me/settings` body: privacy, declared profile and filters together. */
+/**
+ * The `PATCH /me/settings` body: privacy, declared profile and filters together.
+ *
+ * Blocking is deliberately absent. Whether the action exists at all is a platform
+ * policy the owner sets in `/admin` (docs/DECISIONS.md D31), not a per-user setting:
+ * an anonymous user granting themselves a moderation capability was the wrong shape.
+ */
 export const settingsUpdateSchema = z
   .object({
     incomingRequests: z.enum(['everyone', 'nobody']).optional(),
-    /**
-     * Whether the caller wants the "block" action at all.
-     *
-     * The block *feature* is optional in the product (the owner's instruction, see
-     * docs/DECISIONS.md D24): turning it off hides the action and refuses new blocks,
-     * but never removes an existing block — silently un-blocking somebody the user had
-     * blocked would be a safety regression, so the stored blocks stay in force.
-     */
-    blockingEnabled: z.boolean().optional(),
     profile: profileUpdateSchema.optional(),
     search: searchPreferencesUpdateSchema.optional(),
   })

@@ -6,7 +6,11 @@ import {
   GENDERS,
   LANGUAGES,
   MEDIA_KINDS,
+  REPORT_STATUSES,
   type AdminIdentityListResponse,
+  type AdminPlatformView,
+  type AdminReportListResponse,
+  type AdminReportView,
   type AdminStatusView,
   type ArchiveDeletionResponse,
   type ArchiveListResponse,
@@ -17,16 +21,19 @@ import {
   type MediaKind,
   type OwnerMessageListResponse,
   type OwnerMessageView,
+  type ReportStatus,
 } from '@anonlink/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveRestore,
   CircleAlert,
   Eraser,
+  Flag,
   Inbox,
   KeyRound,
   LoaderCircle,
   LogOut,
+  ShieldCheck,
   Trash2,
   UserPlus,
 } from 'lucide-react';
@@ -36,7 +43,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { describeError } from '@/lib/error-text';
+import { describeError, REPORT_REASON_LABELS } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
 import { LANGUAGE_LABELS, OWNER_TOPIC_LABELS } from '@/lib/labels';
 
@@ -91,6 +98,14 @@ const AUDIENCE_OPTIONS = [
     hint: 'Сохраняются чаты, в которых участвует хотя бы один из указанных User ID.',
   },
 ] as const;
+
+/** How the owner's screen names each state of a report. Exhaustive by type. */
+const REPORT_STATUS_LABELS: Record<ReportStatus, string> = {
+  open: 'Открыта',
+  reviewed: 'Просмотрена',
+  actioned: 'Приняты меры',
+  dismissed: 'Отклонена',
+};
 
 const timestampFormat = new Intl.DateTimeFormat('ru-RU', {
   dateStyle: 'short',
@@ -289,6 +304,19 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
     retry: false,
   });
 
+  const platform = useQuery({
+    queryKey: ['admin', 'platform'],
+    queryFn: () => apiRequest<AdminPlatformView>('/admin/platform'),
+    retry: false,
+  });
+
+  const reports = useQuery({
+    queryKey: ['admin', 'reports'],
+    queryFn: () => apiRequest<AdminReportListResponse>('/admin/reports'),
+    refetchInterval: 10_000,
+    retry: false,
+  });
+
   const [openChatId, setOpenChatId] = useState<string | null>(null);
 
   // Signing out and re-entering the key both have to drop the cached policy, because the
@@ -299,6 +327,8 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
     queryClient.removeQueries({ queryKey: ['admin', 'policy'] });
     queryClient.removeQueries({ queryKey: ['admin', 'archives'] });
     queryClient.removeQueries({ queryKey: ['admin', 'messages'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'platform'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'reports'] });
   };
 
   const lock = useMutation({
@@ -312,7 +342,9 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
   const expired =
     (policy.isError && readCode(policy.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
     (archives.isError && readCode(archives.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
-    (inbox.isError && readCode(inbox.error) === ErrorCode.ADMIN_AUTH_REQUIRED);
+    (inbox.isError && readCode(inbox.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
+    (platform.isError && readCode(platform.error) === ErrorCode.ADMIN_AUTH_REQUIRED) ||
+    (reports.isError && readCode(reports.error) === ErrorCode.ADMIN_AUTH_REQUIRED);
 
   if (expired) {
     return (
@@ -359,6 +391,15 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
       {policy.isError ? <ErrorLine error={policy.error} /> : null}
 
       {policy.isSuccess ? <PolicyEditor policy={policy.data} /> : null}
+
+      <ModerationPanel
+        platform={platform.data ?? null}
+        platformLoading={platform.isPending}
+        platformError={platform.isError ? platform.error : null}
+        reports={reports.data?.reports ?? []}
+        reportsLoading={reports.isPending}
+        reportsError={reports.isError ? reports.error : null}
+      />
 
       <OwnerInbox
         messages={inbox.data?.messages ?? []}
@@ -787,6 +828,186 @@ function PolicyEditor({ policy }: { policy: ArchivePolicy }) {
             </Button>
           </div>
         </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ModerationPanel({
+  platform,
+  platformLoading,
+  platformError,
+  reports,
+  reportsLoading,
+  reportsError,
+}: {
+  platform: AdminPlatformView | null;
+  platformLoading: boolean;
+  platformError: unknown;
+  reports: readonly AdminReportView[];
+  reportsLoading: boolean;
+  reportsError: unknown;
+}) {
+  const queryClient = useQueryClient();
+
+  const setBlocking = useMutation({
+    mutationFn: (blockingEnabled: boolean) =>
+      apiRequest<AdminPlatformView>('/admin/platform', {
+        method: 'PUT',
+        json: { blockingEnabled },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'platform'] }),
+  });
+
+  const setStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ReportStatus }) =>
+      apiRequest<AdminReportView>(`/admin/reports/${id}`, {
+        method: 'PATCH',
+        json: { status },
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] }),
+  });
+
+  const openCount = reports.filter((report) => report.status === 'open').length;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="size-4" aria-hidden="true" />
+          Модерация
+        </CardTitle>
+        <CardDescription>
+          Что разрешено на площадке и жалобы пользователей. Статус жалобы — ваша пометка; он никому,
+          кроме вас, не показывается.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-4">
+        <div className="rounded-lg border border-border p-3">
+          {platformLoading ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              Загружаю настройки…
+            </p>
+          ) : null}
+
+          {platformError ? <ErrorLine error={platformError} /> : null}
+
+          {platform ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4"
+                checked={platform.blockingEnabled}
+                disabled={setBlocking.isPending}
+                onChange={(event) => setBlocking.mutate(event.target.checked)}
+              />
+              <span>
+                <span className="font-medium">Разрешить блокировку собеседника</span>
+                {/*
+                  The honest consequence of the platform switch, and the reason the user's
+                  own block list stays visible while it is off: switching a feature off is
+                  not an amnesty, and it must not trap anyone with a block they cannot lift.
+                */}
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Выключено — кнопки «Заблокировать» нет ни у кого, и сервер отказывает в новых
+                  блокировках. Ранее созданные блокировки остаются в силе и остаются видимыми в
+                  настройках того, кто их поставил.
+                </span>
+              </span>
+            </label>
+          ) : null}
+
+          {setBlocking.isError ? <ErrorLine error={setBlocking.error} /> : null}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+          <span className="flex items-center gap-2 text-sm font-medium">
+            <Flag className="size-4" aria-hidden="true" />
+            Жалобы
+            {openCount > 0 ? <Badge variant="accent">открытых: {openCount}</Badge> : null}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            Просроченные жалобы удаляются автоматически.
+          </span>
+        </div>
+
+        {reportsLoading ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю жалобы…
+          </p>
+        ) : null}
+
+        {reportsError ? <ErrorLine error={reportsError} /> : null}
+
+        {!reportsLoading && !reportsError && reports.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока жалоб нет.</p>
+        ) : null}
+
+        {setStatus.isError ? <ErrorLine error={setStatus.error} /> : null}
+
+        {reports.length > 0 ? (
+          <ul className="flex flex-col gap-3">
+            {reports.map((report) => (
+              <li key={report.id} className="rounded-lg border border-border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex flex-wrap items-center gap-2 text-sm">
+                    <Badge variant="accent">{REPORT_REASON_LABELS[report.reason]}</Badge>
+                    <span className="text-muted-foreground">
+                      {formatTimestamp(report.createdAt)}
+                    </span>
+                  </span>
+
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    Статус
+                    <select
+                      aria-label={`Статус жалобы ${report.reporterPublicId}`}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+                      value={report.status}
+                      disabled={setStatus.isPending && setStatus.variables?.id === report.id}
+                      onChange={(event) =>
+                        setStatus.mutate({
+                          id: report.id,
+                          status: event.target.value as ReportStatus,
+                        })
+                      }
+                    >
+                      {REPORT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {REPORT_STATUS_LABELS[status]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {report.details ? (
+                  <p className="mt-2 text-sm whitespace-pre-wrap">{report.details}</p>
+                ) : null}
+
+                {report.messageSnapshot ? (
+                  <blockquote className="mt-2 border-l-2 border-border pl-2 text-sm whitespace-pre-wrap text-muted-foreground">
+                    {report.messageSnapshot}
+                  </blockquote>
+                ) : null}
+
+                <p className="mt-2 text-xs text-muted-foreground">
+                  От:{' '}
+                  <span translate="no" className="font-mono">
+                    {report.reporterPublicId}
+                  </span>{' '}
+                  · На:{' '}
+                  <span translate="no" className="font-mono">
+                    {report.targetPublicId}
+                  </span>{' '}
+                  · удалится {formatTimestamp(report.expiresAt)}
+                </p>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </CardContent>
     </Card>
   );

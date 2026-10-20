@@ -36,6 +36,7 @@ import {
   serverEnv,
 } from './env';
 import { isPortFree, killTree, run, startProcess, waitForHttp } from './support/processes';
+import { setBlockingPolicy } from './support/owner';
 
 export default async function globalSetup(): Promise<void> {
   console.log('[e2e] preparing the stack (web 3200, api 3201)');
@@ -66,6 +67,11 @@ export default async function globalSetup(): Promise<void> {
     killTree(api.pid);
     throw error;
   }
+
+  // Blocking ships **off** (D31): the owner decides whether the action exists at all.
+  // Most specs here test what blocking does, not the shipped default, so the fixture turns
+  // it on once. `moderation.spec.ts` drives the switch itself and restores this state.
+  await setBlockingPolicy(true);
 
   // `next start` reads `next.config.ts`, so it needs the same flag that produced the
   // `.next-e2e` build — otherwise it would serve the development bundle.

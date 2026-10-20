@@ -1,5 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { BlockedUserView, IncomingRequestPolicy, ReportReason } from '@anonlink/shared';
+import type {
+  AdminReportView,
+  BlockedUserView,
+  IncomingRequestPolicy,
+  ReportReason,
+  ReportStatus,
+} from '@anonlink/shared';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { newReportId } from '../common/ids.js';
@@ -142,6 +148,45 @@ export class ModerationService {
     return reportId;
   }
 
+  /**
+   * Reports still inside their retention window, newest first.
+   *
+   * Expired rows are filtered here even though the maintenance sweep deletes them: the
+   * owner must never be shown a complaint the server has already promised to forget, and
+   * between two sweep runs there is a window where the row still exists.
+   */
+  async listReports(limit: number): Promise<AdminReportView[]> {
+    const rows = await this.prisma.report.findMany({
+      where: { expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: REPORT_ADMIN_SELECT,
+    });
+
+    return rows.map(toReportView);
+  }
+
+  /**
+   * Records what the owner did with a report.
+   *
+   * The status is the only editable field: reason, details, participants and the message
+   * snapshot are evidence, and rewriting them would make the record disagree with what the
+   * reporter sent. Returns `null` when the report is gone or already expired.
+   */
+  async setReportStatus(id: string, status: ReportStatus): Promise<AdminReportView | null> {
+    const result = await this.prisma.report.updateMany({
+      where: { id, expiresAt: { gt: new Date() } },
+      data: { status },
+    });
+    if (result.count === 0) return null;
+
+    const row = await this.prisma.report.findUnique({
+      where: { id },
+      select: REPORT_ADMIN_SELECT,
+    });
+    return row ? toReportView(row) : null;
+  }
+
   // ---------------------------------------------------------------------------
   // Identity helpers
   // ---------------------------------------------------------------------------
@@ -229,4 +274,49 @@ export class ModerationService {
   async openReportCount(): Promise<number> {
     return this.prisma.report.count({ where: { status: 'open' } });
   }
+}
+
+/** Exactly the columns the owner's report list reads. */
+const REPORT_ADMIN_SELECT = {
+  id: true,
+  chatId: true,
+  reason: true,
+  status: true,
+  details: true,
+  messageId: true,
+  messageSnapshot: true,
+  createdAt: true,
+  expiresAt: true,
+  reporter: { select: { publicId: true } },
+  target: { select: { publicId: true } },
+} as const;
+
+interface ReportAdminRow {
+  id: string;
+  chatId: string | null;
+  reason: ReportReason;
+  status: ReportStatus;
+  details: string | null;
+  messageId: string | null;
+  messageSnapshot: string | null;
+  createdAt: Date;
+  expiresAt: Date;
+  reporter: { publicId: string };
+  target: { publicId: string };
+}
+
+function toReportView(row: ReportAdminRow): AdminReportView {
+  return {
+    id: row.id,
+    chatId: row.chatId,
+    reason: row.reason,
+    status: row.status,
+    details: row.details,
+    messageId: row.messageId,
+    messageSnapshot: row.messageSnapshot,
+    reporterPublicId: row.reporter.publicId,
+    targetPublicId: row.target.publicId,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+  };
 }

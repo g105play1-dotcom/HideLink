@@ -38,10 +38,11 @@ export interface SessionInfo {
   createdAt: string;
   incomingRequests: 'everyone' | 'nobody';
   /**
-   * Whether the user wants the block action available.
+   * Whether the platform offers the block action at all.
    *
-   * Mirrors the server's setting; the interface only hides controls with it. The rule
-   * itself is enforced by the API, which refuses a new block when this is `false`.
+   * A policy the owner sets in `/admin` (D31), not a personal setting. The interface
+   * only hides controls with it; the rule itself is enforced by the API, which refuses
+   * a new block while the policy is off.
    */
   blockingEnabled: boolean;
   /** What this identity says about itself. Voluntary, unverified, never shown to peers. */

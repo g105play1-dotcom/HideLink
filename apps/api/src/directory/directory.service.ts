@@ -60,14 +60,6 @@ export interface IdentityFacts {
   readonly publicId: string;
   readonly banned: boolean;
   readonly incomingRequests: IncomingRequestPolicy;
-  /**
-   * Whether this identity wants the "block a peer" action at all.
-   *
-   * Carried here because the block action is refused in the chat domain, which runs
-   * inside the matchmaking critical section and must not `await` a database read.
-   * Existing blocks are unaffected by it — see docs/DECISIONS.md D24.
-   */
-  readonly blockingEnabled: boolean;
   /** Voluntary, self-declared data. Never shown to a peer; only feeds filters. */
   readonly profile: DeclaredProfile;
   readonly preferences: SearchPreferences;
@@ -128,18 +120,6 @@ export class DirectoryService {
   }
 
   /**
-   * Whether the user wants the block action available.
-   *
-   * Mirrors the database default for an unknown identity, exactly like
-   * {@link acceptsIncomingRequests}: the caller has already loaded the facts, so `true`
-   * here would mean "nothing was cached", and refusing a safety action because of a cache
-   * miss would be the wrong failure.
-   */
-  blockingAllowed(userId: string): boolean {
-    return this.facts.get(userId)?.blockingEnabled ?? true;
-  }
-
-  /**
    * Whether a chat between `a` and `b` is forbidden by a block in *either*
    * direction. Requires `a` to be loaded; see the class comment.
    */
@@ -172,12 +152,7 @@ export class DirectoryService {
   /** Updates cached facts after a local mutation (settings change, ban). */
   patch(
     userId: string,
-    patch: Partial<
-      Pick<
-        IdentityFacts,
-        'banned' | 'incomingRequests' | 'blockingEnabled' | 'profile' | 'preferences'
-      >
-    >,
+    patch: Partial<Pick<IdentityFacts, 'banned' | 'incomingRequests' | 'profile' | 'preferences'>>,
   ): void {
     const current = this.facts.get(userId);
     if (!current) return;
@@ -226,7 +201,6 @@ export class DirectoryService {
       publicId: identity.publicId,
       banned: identity.bannedAt !== null,
       incomingRequests: identity.incomingRequests,
-      blockingEnabled: identity.blockingEnabled,
       profile: toDeclaredProfile(identity),
       preferences: toSearchPreferences(identity),
     });

@@ -71,6 +71,37 @@ async function waitForReady(env: NodeJS.ProcessEnv, healthPath: string): Promise
 /** Captured output, so a failed start reports the server's own explanation. */
 let errorOutput = '';
 
+/**
+ * Turns the platform's blocking switch on for the suite.
+ *
+ * Talks to the real owner routes instead of writing the table directly: the fixture then
+ * fails the same way a broken admin session or a guarded route would, which is worth
+ * knowing before 26 test files start.
+ */
+async function enableBlocking(token: string | undefined): Promise<void> {
+  if (!token) throw new Error('ADMIN_TOKEN is missing from the test environment.');
+
+  const signIn = await fetch(`${TEST_API_BASE}/admin/session`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  if (!signIn.ok) throw new Error(`admin sign-in failed: ${signIn.status}`);
+
+  const cookie = signIn.headers
+    .getSetCookie()
+    .find((value) => value.startsWith('anonlink_admin='))
+    ?.split(';')[0];
+  if (!cookie) throw new Error('admin sign-in did not set a cookie.');
+
+  const updated = await fetch(`${TEST_API_BASE}/admin/platform`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', cookie },
+    body: JSON.stringify({ blockingEnabled: true }),
+  });
+  if (!updated.ok) throw new Error(`admin platform update failed: ${updated.status}`);
+}
+
 export default async function setup(): Promise<() => Promise<void>> {
   const env = testEnv();
 
@@ -110,6 +141,11 @@ export default async function setup(): Promise<() => Promise<void>> {
   });
 
   await waitForReady(env, `${TEST_API_BASE}/health/ready`);
+
+  // 5. Blocking is a platform policy and ships **off** (D31). Most suites here are about
+  //    the mechanics of blocking, not about the shipped default, so the fixture turns it
+  //    on once. `platform.test.ts` exercises the default and restores this state itself.
+  await enableBlocking(env.ADMIN_TOKEN);
 
   return async () => {
     if (!server) return;

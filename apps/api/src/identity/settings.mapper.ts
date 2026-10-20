@@ -35,7 +35,6 @@ import {
  */
 export interface IdentitySettingsRow {
   incomingRequests: string;
-  blockingEnabled: boolean;
   declaredGender: string | null;
   declaredBirthYear: number | null;
   declaredCity: string | null;
@@ -53,7 +52,6 @@ export interface IdentitySettingsRow {
 /** Exactly the columns `IdentitySettingsRow` describes, for `select`. */
 export const IDENTITY_SETTINGS_SELECT = {
   incomingRequests: true,
-  blockingEnabled: true,
   declaredGender: true,
   declaredBirthYear: true,
   declaredCity: true,
@@ -115,7 +113,6 @@ export function toSearchPreferences(row: IdentitySettingsRow): SearchPreferences
 export function toSettingsView(row: IdentitySettingsRow): IdentitySettingsView {
   return {
     incomingRequests: toIncomingRequests(row.incomingRequests),
-    blockingEnabled: row.blockingEnabled,
     profile: toDeclaredProfile(row),
     search: toSearchPreferences(row),
   };
@@ -136,7 +133,6 @@ export function toSettingsView(row: IdentitySettingsRow): IdentitySettingsView {
  */
 export interface SettingsUpdateCommand {
   incomingRequests?: IncomingRequestPolicy;
-  blockingEnabled?: boolean;
   profile?: ProfileUpdate;
   search?: SearchPreferences;
 }
@@ -144,7 +140,6 @@ export interface SettingsUpdateCommand {
 /** Column values for a settings write. Structural so Prisma can accept it directly. */
 export interface IdentitySettingsData {
   incomingRequests?: IncomingRequestPolicy;
-  blockingEnabled?: boolean;
   declaredGender?: Gender | null;
   declaredBirthYear?: number | null;
   declaredCity?: string | null;

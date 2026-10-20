@@ -27,13 +27,14 @@ export const ErrorCode = {
   INCOMING_REQUESTS_DISABLED: 'INCOMING_REQUESTS_DISABLED',
   BLOCKED: 'BLOCKED',
   /**
-   * The user switched the "block" action off in their own settings.
+   * The administration has switched the "block" action off for the whole platform.
    *
    * A separate code from `BLOCKED` on purpose: one means "you and that person are
-   * separated", the other means "you asked not to have this button at all". Collapsing
+   * separated", the other means "this action is not offered here at all". Collapsing
    * them would make a stale tab look like the other person's doing.
    */
   BLOCKING_DISABLED: 'BLOCKING_DISABLED',
+  REPORT_NOT_FOUND: 'REPORT_NOT_FOUND',
   UNSUPPORTED_EVENT: 'UNSUPPORTED_EVENT',
   ADMIN_AUTH_REQUIRED: 'ADMIN_AUTH_REQUIRED',
   FORBIDDEN_ORIGIN: 'FORBIDDEN_ORIGIN',
@@ -67,7 +68,8 @@ const MESSAGES: Record<ErrorCode, string> = {
   REQUEST_DECLINED: 'The connection request was declined.',
   INCOMING_REQUESTS_DISABLED: 'This user does not accept direct requests.',
   BLOCKED: 'Communication with this user is not possible.',
-  BLOCKING_DISABLED: 'Blocking is disabled in your settings.',
+  BLOCKING_DISABLED: 'Blocking is disabled by the administration.',
+  REPORT_NOT_FOUND: 'This report no longer exists.',
   UNSUPPORTED_EVENT: 'Unsupported event.',
   ADMIN_AUTH_REQUIRED: 'The owner key is required for this endpoint.',
   FORBIDDEN_ORIGIN: 'This origin is not allowed to connect.',

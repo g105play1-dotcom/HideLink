@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto';
+
 import type { ChatView } from '@anonlink/protocol';
-import { ErrorCode } from '@anonlink/shared';
+import { ErrorCode, type AdminReportView } from '@anonlink/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   RealtimeClient,
+  adminHttp,
   createIdentity,
   http,
   joinQueue,
@@ -99,6 +102,65 @@ describe('reporting', () => {
 
     expect(attempt.ok).toBe(false);
     if (!attempt.ok) expect(attempt.error.code).toBe(ErrorCode.INVALID_INPUT);
+  });
+});
+
+describe('the owner report list', () => {
+  it('shows the filed report with its evidence, and records the owner decision', async () => {
+    const a = await client();
+    const b = await client();
+    const { chatId } = await matchPair(a, b);
+
+    // Unique per run: the test database is not wiped, and the list is global. A fixed
+    // string would find a report left by an earlier run and assert against the wrong row.
+    const marker = `жалоба-${randomUUID()}`;
+
+    const reported = await a.emit<{ reportId: string }>('report:send', {
+      chatId,
+      reason: 'abuse',
+      details: marker,
+    });
+    expect(reported.ok).toBe(true);
+    if (!reported.ok) return;
+
+    const list = await adminHttp<{ reports: AdminReportView[] }>('/admin/reports');
+    expect(list.status).toBe(200);
+
+    const found = list.body.reports.find((report) => report.id === reported.data.reportId);
+    expect(found).toMatchObject({
+      reason: 'abuse',
+      status: 'open',
+      details: marker,
+      chatId,
+      reporterPublicId: a.identity.publicId,
+      targetPublicId: b.identity.publicId,
+    });
+    expect(typeof found?.expiresAt).toBe('string');
+
+    const patched = await adminHttp<AdminReportView>(`/admin/reports/${reported.data.reportId}`, {
+      method: 'PATCH',
+      body: { status: 'actioned' },
+    });
+    expect(patched.status).toBe(200);
+    expect(patched.body.status).toBe('actioned');
+
+    const again = await adminHttp<{ reports: AdminReportView[] }>('/admin/reports');
+    const persisted = again.body.reports.find((report) => report.id === reported.data.reportId);
+    expect(persisted?.status).toBe('actioned');
+  });
+
+  it('refuses an anonymous caller and an unknown report', async () => {
+    const user = await createIdentity();
+
+    const anonymous = await http('/admin/reports', { cookie: user.cookie });
+    expect(anonymous.status).toBe(401);
+
+    const missing = await adminHttp<{ error: { code: string } }>(`/admin/reports/${randomUUID()}`, {
+      method: 'PATCH',
+      body: { status: 'dismissed' },
+    });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe(ErrorCode.REPORT_NOT_FOUND);
   });
 });
 

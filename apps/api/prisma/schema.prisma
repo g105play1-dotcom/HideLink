@@ -112,13 +112,12 @@ model Identity {
 
   incomingRequests IncomingRequestPolicy @default(everyone)
 
-  /// Whether the "block a peer" action is offered at all.
+  /// Legacy per-user switch, stored but no longer read.
   ///
-  /// Off hides the action *and* the blocked list in the interface, and the API refuses
-  /// to create a new block. It never removes an existing block: silently un-blocking
-  /// somebody the user had blocked would be a safety regression, so turning the feature
-  /// off only stops new blocks and the existing rows stay in force — visible again the
-  /// moment the user switches the feature back on. See docs/DECISIONS.md D24.
+  /// Until 2026-10-20 the user decided whether the block action existed. The owner
+  /// corrected that: it is a platform policy, set in `/admin` (`PlatformPolicy`), so this
+  /// column is kept only because migrations are additive — dropping it is not worth the
+  /// risk and the data has no meaning. See docs/DECISIONS.md D31.
   blockingEnabled Boolean @default(true)
 
   // ---------------------------------------------------------------------------
@@ -472,4 +471,29 @@ model ArchivedMessage {
   archive ChatArchive @relation(fields: [archiveId], references: [id], onDelete: Cascade)
 
   @@index([archiveId, seq])
+}
+
+// -----------------------------------------------------------------------------
+// Platform policy (owner-controlled)
+// -----------------------------------------------------------------------------
+
+/// Switches that belong to the installation, not to a person.
+///
+/// Exactly one row, with the fixed id `default`. A missing row means the shipped
+/// defaults, so an installation that never opened `/admin` needs no seed data.
+///
+/// `blockingEnabled` is the first entry: the owner decided (2026-10-20, D31) that the
+/// availability of blocking is a moderation decision. It is **off** by default, which is
+/// what the owner asked for — an action nobody can use until the owner enables it.
+model PlatformPolicy {
+  id String @id @default("default") @db.VarChar(16)
+
+  /// Whether the "block a peer" action exists for anybody at all.
+  ///
+  /// Off hides the action in the interface and makes the API refuse new blocks. It never
+  /// removes an existing block: silently un-blocking somebody would be a safety
+  /// regression, and the block list stays readable so it can be undone by hand.
+  blockingEnabled Boolean @default(false)
+
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
 }

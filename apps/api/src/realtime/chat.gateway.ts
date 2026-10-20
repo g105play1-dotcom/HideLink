@@ -45,6 +45,7 @@ import { DirectoryService } from '../directory/directory.service.js';
 import { IdentityService } from '../identity/identity.service.js';
 import type { AuthenticatedIdentity } from '../identity/identity.service.js';
 import { PresenceService } from '../presence/presence.service.js';
+import { PlatformService } from '../platform/platform.service.js';
 
 type AnonLinkSocket = Socket<
   ClientToServerEvents,
@@ -134,6 +135,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     private readonly directory: DirectoryService,
     private readonly rateLimit: RateLimitService,
     private readonly bus: AppEventBus,
+    private readonly platform: PlatformService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -253,6 +255,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       protocolVersion: PROTOCOL_VERSION,
       publicId: identity.publicId,
       identityCreatedAt: identity.identityCreatedAt.toISOString(),
+      blockingEnabled: this.platform.blockingEnabled(),
       settings: identity.settings,
       limits: { messageMaxLength: this.config.MESSAGE_MAX_LENGTH },
       queued: state.queued,

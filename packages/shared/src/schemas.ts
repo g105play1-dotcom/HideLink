@@ -11,6 +11,7 @@ import {
   OWNER_MESSAGE_MAX_LENGTH,
   OWNER_MESSAGE_TOPICS,
   REPORT_REASONS,
+  REPORT_STATUSES,
 } from './limits.js';
 import type { SettingsUpdate } from './preferences.js';
 
@@ -200,6 +201,30 @@ export const ownerMessageListQuerySchema = z
 /** REST: `DELETE /api/v1/admin/messages/:id` */
 export const ownerMessageParamsSchema = z.object({ id: z.uuid() }).strict();
 
+/**
+ * REST: `PUT /api/v1/admin/platform`.
+ *
+ * A whole object with one required field, `.strict()`: a request that tries to set
+ * anything the owner surface does not control is rejected rather than silently ignored.
+ */
+export const adminPlatformSchema = z.object({ blockingEnabled: z.boolean() }).strict();
+
+/** REST: `GET /api/v1/admin/reports?limit=` */
+export const adminReportListQuerySchema = z
+  .object({ limit: z.coerce.number().int().min(1).max(200).optional() })
+  .strict();
+
+/** REST: `PATCH /api/v1/admin/reports/:id` */
+export const adminReportParamsSchema = z.object({ id: z.uuid() }).strict();
+
+/**
+ * REST: `PATCH /api/v1/admin/reports/:id` body.
+ *
+ * Only the status is editable. Reason, text and participants are evidence: rewriting
+ * them would make the record disagree with what the reporter actually sent.
+ */
+export const adminReportUpdateSchema = z.object({ status: z.enum(REPORT_STATUSES) }).strict();
+
 export type AdminSessionInput = z.infer<typeof adminSessionSchema>;
 export type AdminIdentityQuery = z.infer<typeof adminIdentityQuerySchema>;
 export type ArchiveListQuery = z.infer<typeof archiveListQuerySchema>;
@@ -207,3 +232,7 @@ export type ArchiveParams = z.infer<typeof archiveParamsSchema>;
 export type AdminConfirmInput = z.infer<typeof adminConfirmSchema>;
 export type OwnerMessageListQuery = z.infer<typeof ownerMessageListQuerySchema>;
 export type OwnerMessageParams = z.infer<typeof ownerMessageParamsSchema>;
+export type AdminPlatformInput = z.infer<typeof adminPlatformSchema>;
+export type AdminReportListQuery = z.infer<typeof adminReportListQuerySchema>;
+export type AdminReportParams = z.infer<typeof adminReportParamsSchema>;
+export type AdminReportUpdateInput = z.infer<typeof adminReportUpdateSchema>;

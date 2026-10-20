@@ -31,6 +31,7 @@ import {
 import { RateLimitService } from '../common/rate-limit.service.js';
 import { zodBody, zodParam } from '../common/zod-validation.pipe.js';
 import { DirectoryService } from '../directory/directory.service.js';
+import { PlatformService } from '../platform/platform.service.js';
 import { IdentityService, type AuthenticatedIdentity } from './identity.service.js';
 import { Anonymous, CurrentIdentity } from './request-context.js';
 
@@ -46,6 +47,7 @@ export class IdentityController {
   constructor(
     private readonly identityService: IdentityService,
     private readonly rateLimit: RateLimitService,
+    private readonly platform: PlatformService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -122,6 +124,7 @@ export class IdentityController {
       publicId: identity.publicId,
       createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
+      blockingEnabled: this.platform.blockingEnabled(),
       settings: identity.settings,
     };
   }
@@ -150,6 +153,7 @@ export class UsersController {
     private readonly identityService: IdentityService,
     private readonly rateLimit: RateLimitService,
     private readonly directory: DirectoryService,
+    private readonly platform: PlatformService,
   ) {}
 
   /**
@@ -199,9 +203,6 @@ export class UsersController {
 
     const updated = await this.identityService.updateSettings(identity.userId, {
       ...(settings.incomingRequests ? { incomingRequests: settings.incomingRequests } : {}),
-      ...(settings.blockingEnabled !== undefined
-        ? { blockingEnabled: settings.blockingEnabled }
-        : {}),
       ...(settings.profile ? { profile: settings.profile } : {}),
       ...(search ? { search } : {}),
     });
@@ -214,7 +215,6 @@ export class UsersController {
     // the next reconnect — the classic "saved but ignored" setting.
     this.directory.patch(identity.userId, {
       incomingRequests: updated.incomingRequests,
-      blockingEnabled: updated.blockingEnabled,
       profile: updated.profile,
       preferences: updated.search,
     });
@@ -223,6 +223,7 @@ export class UsersController {
       publicId: identity.publicId,
       createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
+      blockingEnabled: this.platform.blockingEnabled(),
       settings: updated,
     };
   }
@@ -232,6 +233,7 @@ export class UsersController {
       publicId: identity.publicId,
       createdAt: identity.identityCreatedAt.toISOString(),
       sessionExpiresAt: identity.sessionExpiresAt.toISOString(),
+      blockingEnabled: this.platform.blockingEnabled(),
       settings: identity.settings,
     };
   }

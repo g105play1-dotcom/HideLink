@@ -24,7 +24,7 @@ The privacy posture is a storage decision, not a policy paragraph.
 | --- | --- |
 | Chat messages | **Only if the owner switches archiving on** — it is off by default. Otherwise in memory only, bounded by `CHAT_MEMORY_MESSAGE_LIMIT`, dropped when the chat ends. The archive is described in §13. |
 | Who talked to whom | `ChatSession` always records lifecycle metadata (participants, start/end, `messageCount`, end reason) — never text. A transcript exists only for chats the owner's archive policy selected (§13). |
-| Message text of a reported message | Only inside the abuse report, until `REPORT_RETENTION_DAYS` (default 30) elapses, then hard-deleted. |
+| Message text of a reported message | Only inside the abuse report, until `REPORT_RETENTION_DAYS` (default 30) elapses, then hard-deleted. The client sends the id of the last message it holds; the server copies the text from its own chat state, so the reporter cannot forge it. |
 | Message text sent through "Связаться с администрацией" | **Yes, on purpose** — the user asked a human to read it, and is told so before sending. Bounded by `OWNER_MESSAGE_MAX_LENGTH`, deleted after `OWNER_MESSAGE_RETENTION_DAYS` (default 180), readable only with `ADMIN_TOKEN` (§13.1). |
 | Name, e-mail, phone, address, GPS, device id | **Never asked for, never stored.** There is no code path that accepts them. |
 | Client IP / User-Agent | **Not stored by default.** Only a salted SHA-256 digest, and only when `ABUSE_HASH_SALT` is deliberately set. |
@@ -283,10 +283,12 @@ starts; each message additionally re-checks the switch, so turning it off stops 
    filesystem reads every kept conversation. There is no encryption at rest.
 2. Anyone who obtains `ADMIN_TOKEN` reads the whole archive. There is no second factor, no rotation
    flow and no per-device revocation: changing the value in `.env` and restarting is the rotation.
-3. The admin surface is **not** covered by the E2E suite (the browser flow at `/admin` is untested by
-   a machine); its API is covered by `apps/api/test/archive.test.ts`.
+3. The `/admin` browser flow is covered by the E2E suite (`tests/e2e/specs/admin.spec.ts`,
+   `tests/e2e/specs/moderation.spec.ts`); its API is covered by `apps/api/test/archive.test.ts`,
+   `apps/api/test/platform.test.ts` and `apps/api/test/moderation.test.ts`.
 4. The owner key is a static shared secret, not an account. There is no audit log of who read what
-   (there is one owner), and no log of admin actions beyond `archive.policy_updated`.
+   (there is one owner), and no log of admin actions beyond `archive.policy_updated` and
+   `platform.policy_changed`.
 5. Anything that can read the API process's environment — a shell on the box, a debugger, a process
    dump — can read the key.
 
@@ -294,8 +296,8 @@ The alternative the owner rejected was to keep nothing (D1). A third option — 
 with a key held by the same process — was rejected as theatre: the process must decrypt it to serve
 the page.
 
-Moderators are a separate matter: there is still no moderation console, and a report carries only the
-single snapshotted message that was reported.
+Moderators are a separate matter: the moderation panel (§13.2) exists, but there are still no
+moderator accounts. A report carries only the single snapshotted message the reporter's client named.
 
 ### 13.1 The owner's inbox ("Связаться с администрацией")
 
@@ -322,6 +324,32 @@ reads it — so the controls are about *bounding* it rather than avoiding it:
 The message text is plaintext in PostgreSQL, like the archive. The contact line is free text and is
 **not** verified: nothing sends to it, so a user cannot be turned into an outbound relay, and a forged
 value can only mislead the owner's own reply.
+
+### 13.2 Moderation panel
+
+The owner asked (2026-10-20, `docs/DECISIONS.md` D31) that blocking stop being a personal setting,
+that it ship **off**, and that reports — which users could already file — become readable. The panel
+is the third card on `/admin`, behind the same `AdminGuard` and therefore the same key as the archive
+and the inbox; with no `ADMIN_TOKEN` those routes do not exist.
+
+- **Blocking.** `PlatformPolicy` holds one row (`id = 'default'`) with `blockingEnabled`, default
+  `false`; a missing row means `false`. `PUT /admin/platform` is validated by `.strict()` and
+  `PlatformService` caches the value for the synchronous chat path. A new block is refused with
+  `BLOCKING_DISABLED` (409) by both `block:peer` and `POST /blocks`. The unblock path is deliberately
+  *not* gated: switching the action off must not trap anyone with a block they cannot lift.
+- **Reports.** `GET /admin/reports?limit=` returns non-expired reports newest first;
+  `PATCH /admin/reports/:id` accepts only `{ status }` (`open`, `reviewed`, `actioned`, `dismissed`).
+  Reason, details, participants, chat id and the message snapshot are evidence and cannot be edited
+  through the API. The list is capped by `limit` (default 50, maximum 200) so one request cannot read
+  the whole table.
+- **What is exposed.** Reports are plaintext in PostgreSQL and readable by anyone who obtains
+  `ADMIN_TOKEN`. There is no per-moderator identity, no second factor and no audit trail of who
+  changed a status; with one owner the only possible "who" is the owner himself. This is listed as a
+  gap in §14.
+- **What is not exposed.** The panel is not reachable from the user application; the report form does
+  not reveal the peer's User ID in a random chat, and the report response to the reporter contains
+  only an id. Report text is rendered as text by React (no HTML), so a hostile reporter cannot inject
+  markup into the owner's page.
 
 ## 14. Known gaps and what must happen before a public deployment
 
@@ -379,14 +407,14 @@ Each item says what is missing and how it would be verified. None of them is a f
     database and its backups. *Verify:* none — this is a property, not a defect to be tested away; the
     mitigation is an encrypted volume and a backup policy, neither of which is in this repository.
 15. **No second factor and no key rotation for `ADMIN_TOKEN`.** One static secret grants the whole
-    archive. *Verify:* rotate the value, restart, and confirm the old cookie stops working (the cookie
-    holds the key, so it does).
-16. **The `/admin` browser flow has no automated test.** The admin *API* is covered end to end; the
-    page itself is verified by hand only. *Verify:* an E2E spec with an admin context that opens
-    `/admin`, enters the key, sets a policy and reads a stored transcript.
-17. **Admin actions are not audited.** `archive.policy_updated` is logged (counts, not content), but
-    reads and deletions leave no trace. There is one owner, so there is no "who" to record — only
-    "when", which is not recorded either.
+    archive, the inbox and the moderation panel. *Verify:* rotate the value, restart, and confirm the
+    old cookie stops working (the cookie holds the key, so it does).
+16. **Admin actions are not attributed and are barely audited.** The `/admin` browser flow is now
+    covered by `admin.spec.ts` and `moderation.spec.ts`, but the key is one shared secret: a report
+    status change names no person, and only `archive.policy_updated` / `platform.policy_changed` are
+    logged (values, not content). Reads, deletions and report status changes leave no trace. With one
+    owner there is no "who" to record — only "when", which is not recorded either. *Verify:* add
+    owner accounts and an append-only admin audit trail before a second person gets the key.
 
 ## 15. Facts a reader can verify
 
@@ -404,6 +432,10 @@ pnpm --filter @anonlink/api test test/archive.test.ts
 # Blocks survive a reconnect; a third party cannot touch someone else's chat
 pnpm --filter @anonlink/api test test/moderation.test.ts
 pnpm test:e2e -- specs/access.spec.ts
+
+# Blocking is off by default; only the owner can enable it, and the server enforces it
+pnpm --filter @anonlink/api test test/unit/platform.test.ts test/platform.test.ts
+pnpm test:e2e -- specs/moderation.spec.ts
 
 # Rate-limit behaviour, in isolation
 pnpm --filter @anonlink/api test test/unit/rate-limit.test.ts

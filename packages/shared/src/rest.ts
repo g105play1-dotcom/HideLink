@@ -1,5 +1,11 @@
 import type { ArchivePolicy } from './archive.js';
-import type { ChatKind, IncomingRequestPolicy, OwnerMessageTopic } from './limits.js';
+import type {
+  ChatKind,
+  IncomingRequestPolicy,
+  OwnerMessageTopic,
+  ReportReason,
+  ReportStatus,
+} from './limits.js';
 import type { DeclaredProfile, SearchPreferences } from './preferences.js';
 
 /**
@@ -20,6 +26,14 @@ export interface SessionView {
   publicId: string;
   createdAt: string;
   sessionExpiresAt: string;
+  /**
+   * Whether the platform offers the "block a peer" action at all.
+   *
+   * A platform policy, not a personal setting (docs/DECISIONS.md D31): the owner turns
+   * it on or off in `/admin`, and the same answer is given to every user. The interface
+   * uses it only to hide a button that the server would refuse anyway.
+   */
+  blockingEnabled: boolean;
   settings: IdentitySettingsView;
 }
 
@@ -33,13 +47,6 @@ export interface SessionView {
  */
 export interface IdentitySettingsView {
   incomingRequests: IncomingRequestPolicy;
-  /**
-   * Whether the user wants the "block a peer" action available.
-   *
-   * Off means the action is not offered and the server refuses new blocks. Blocks that
-   * already exist are neither removed nor forgotten — see docs/DECISIONS.md D24.
-   */
-  blockingEnabled: boolean;
   /** What the owner says about themselves. Unverified; used only to evaluate filters. */
   profile: DeclaredProfile;
   /** How the owner wants random partners filtered. */
@@ -168,4 +175,43 @@ export interface OwnerMessageListResponse {
 export interface OwnerMessageCreatedResponse {
   id: string;
   expiresAt: string;
+}
+
+/**
+ * Platform switches the owner controls in `/admin`.
+ *
+ * Kept apart from `IdentitySettingsView` on purpose: these are not the caller's settings,
+ * and a client must not be able to patch them through `/me/settings`.
+ */
+export interface AdminPlatformView {
+  /** Whether the "block a peer" action exists for anybody at all. Off by default. */
+  blockingEnabled: boolean;
+}
+
+/** One abuse report as the owner sees it. */
+export interface AdminReportView {
+  id: string;
+  reason: ReportReason;
+  status: ReportStatus;
+  /** The reporter's own words, when they added any. */
+  details: string | null;
+  /** Server-side snapshot of the reported message, when the report named one. */
+  messageSnapshot: string | null;
+  /** Server-side id of the reported message. Never accepted from a client. */
+  messageId: string | null;
+  chatId: string | null;
+  reporterPublicId: string;
+  targetPublicId: string;
+  createdAt: string;
+  /** Retention deadline; the maintenance sweep hard-deletes the row then. */
+  expiresAt: string;
+}
+
+export interface AdminReportListResponse {
+  reports: AdminReportView[];
+}
+
+/** The only field of a report the owner edits. The rest is evidence. */
+export interface AdminReportUpdate {
+  status: ReportStatus;
 }

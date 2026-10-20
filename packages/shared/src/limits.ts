@@ -35,6 +35,16 @@ export const SESSION_TOKEN_BYTES = 32;
 export const REPORT_REASONS = ['spam', 'abuse', 'sexual', 'violence', 'other'] as const;
 export type ReportReason = (typeof REPORT_REASONS)[number];
 
+/**
+ * How far the administration has got with a report.
+ *
+ * `open` is what a fresh report is; the other three are the owner's own notes on what
+ * happened to it. They are not shown to the reporter, who is told only that the report
+ * was sent.
+ */
+export const REPORT_STATUSES = ['open', 'reviewed', 'actioned', 'dismissed'] as const;
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+
 export type IncomingRequestPolicy = 'everyone' | 'nobody';
 export const INCOMING_REQUEST_POLICIES: readonly IncomingRequestPolicy[] = ['everyone', 'nobody'];
 

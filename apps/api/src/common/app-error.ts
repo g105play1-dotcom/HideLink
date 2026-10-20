@@ -81,7 +81,9 @@ function defaultMessage(code: ErrorCode): string {
     case ErrorCode.BLOCKED:
       return 'Communication with this user is not possible.';
     case ErrorCode.BLOCKING_DISABLED:
-      return 'Blocking is switched off in this identity settings.';
+      return 'Blocking is disabled by the administration.';
+    case ErrorCode.REPORT_NOT_FOUND:
+      return 'This report no longer exists.';
     case ErrorCode.UNSUPPORTED_EVENT:
       return 'Unsupported event.';
     case ErrorCode.ADMIN_AUTH_REQUIRED:
@@ -114,6 +116,7 @@ function defaultStatus(code: ErrorCode): number {
       return 403;
     case ErrorCode.USER_NOT_FOUND:
     case ErrorCode.CHAT_NOT_FOUND:
+    case ErrorCode.REPORT_NOT_FOUND:
     case ErrorCode.REQUEST_NOT_FOUND:
     case ErrorCode.REQUEST_EXPIRED:
     case ErrorCode.ROUTE_NOT_FOUND:
