@@ -126,7 +126,7 @@ model Identity {
   //
   // Every column below is optional and none of it is verified: AnonLink has no
   // registration, so there is nothing to verify against. The whole group exists so a
-  // user can say "поиск: жен., 25-35, мой город" and be matched accordingly — it is a
+  // user can say "поиск: жен., 25-35, Москва" and be matched accordingly — it is a
   // preference hint for the matchmaker, never a published fact about a person.
   //
   // The languages are stored as free strings rather than a Postgres enum because the
@@ -148,9 +148,13 @@ model Identity {
   /// Inclusive age bounds applied to the *candidate's* declared year of birth.
   prefAgeMin   Int?
   prefAgeMax   Int?
-  /// `city` | `region` — the owner's own declared places the candidate must share at
-  /// least one of. Empty = anywhere (there is no stored "any" value; see D22).
-  prefLocations String[] @default([])
+  /// Place names the candidate's declared city must be one of. Empty = anywhere.
+  ///
+  /// The filter names places; it no longer means "the same place as mine". The two
+  /// lists form one union (docs/DECISIONS.md D27).
+  prefCities   String[] @default([])
+  /// Place names the candidate's declared region must be one of. Empty = anywhere.
+  prefRegions  String[] @default([])
   /// Languages the owner wants the candidate to share at least one of. Empty = no constraint.
   prefLanguages String[] @default([])
   /// Whether the server may drop filters, visibly, after a long wait. Off by default.

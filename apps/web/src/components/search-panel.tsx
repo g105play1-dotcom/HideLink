@@ -3,6 +3,7 @@
 import { LoaderCircle, Search, Settings2 } from 'lucide-react';
 import { useState } from 'react';
 
+import { AdSlot } from '@/components/ad-slot';
 import { SettingsPanel, SettingsSkeleton } from '@/components/settings-panel';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -122,7 +123,7 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
   const saved = savedSearch ? describeCriteria(savedSearch) : [];
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-1 flex-col gap-3">
       <Card>
         <CardContent className="flex flex-col gap-3 p-4">
           <Button size="lg" onClick={() => void start()} disabled={pending} className="w-full">
@@ -167,7 +168,18 @@ export function SearchPanel({ session }: { session: SessionInfo | null }) {
         <div id="settings-panel">
           {session ? <SettingsPanel session={session} /> : <SettingsSkeleton />}
         </div>
-      ) : null}
+      ) : (
+        /*
+          Folding the settings leaves the largest empty area on the page, and the owner
+          asked for it to be given to advertising (docs/DECISIONS.md D28). So it is a
+          real, sized container that takes exactly the space the settings would have
+          filled — a creative added later changes the content, not the layout. While
+          there is nothing to show it paints nothing, like the side rails (D23).
+        */
+        <aside aria-hidden="true" data-ad-slot="under-settings" className="flex min-h-40 flex-1">
+          <AdSlot variant="banner" />
+        </aside>
+      )}
     </div>
   );
 }

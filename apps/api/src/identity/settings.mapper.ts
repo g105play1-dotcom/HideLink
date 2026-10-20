@@ -16,14 +16,12 @@ import {
   INCOMING_REQUEST_POLICIES,
   isGender,
   isLanguage,
-  isLocationMode,
-  LOCATION_MODES,
+  normalizePlaces,
   type DeclaredProfile,
   type Gender,
   type IdentitySettingsView,
   type IncomingRequestPolicy,
   type Language,
-  type LocationMode,
   type ProfileUpdate,
   type SearchPreferences,
 } from '@anonlink/shared';
@@ -46,7 +44,8 @@ export interface IdentitySettingsRow {
   prefGenders: readonly string[];
   prefAgeMin: number | null;
   prefAgeMax: number | null;
-  prefLocations: readonly string[];
+  prefCities: readonly string[];
+  prefRegions: readonly string[];
   prefLanguages: readonly string[];
   prefRelax: boolean;
 }
@@ -63,7 +62,8 @@ export const IDENTITY_SETTINGS_SELECT = {
   prefGenders: true,
   prefAgeMin: true,
   prefAgeMax: true,
-  prefLocations: true,
+  prefCities: true,
+  prefRegions: true,
   prefLanguages: true,
   prefRelax: true,
 } as const satisfies Record<keyof IdentitySettingsRow, true>;
@@ -79,17 +79,15 @@ function languages(values: readonly string[]): Language[] {
 }
 
 /**
- * The place modes actually stored, in vocabulary order.
+ * The place lists actually stored.
  *
- * Narrowing through `isLocationMode` is what makes an unrecognised or legacy value
- * disappear rather than reach the matchmaker — and disappearing here means "anywhere",
- * which is the same bounded fail-open the gender filter has (see docs/DECISIONS.md D22).
- * `LOCATION_MODES` supplies the order and drops duplicates, so two rows holding the same
- * choice written in a different order still compare equal.
+ * `normalizePlaces` deduplicates by the folded spelling and drops unusable entries, so a
+ * hand-edited row cannot make the matchmaker compare against a value no request could
+ * have produced. An empty list means "anywhere" — the same bounded fail-open the other
+ * filters have (see docs/DECISIONS.md D22/D27).
  */
-function locations(values: readonly string[]): LocationMode[] {
-  const chosen = new Set(values.filter(isLocationMode));
-  return LOCATION_MODES.filter((mode) => chosen.has(mode));
+function places(values: readonly string[]): string[] {
+  return normalizePlaces(values);
 }
 
 export function toDeclaredProfile(row: IdentitySettingsRow): DeclaredProfile {
@@ -107,7 +105,8 @@ export function toSearchPreferences(row: IdentitySettingsRow): SearchPreferences
     genders: row.prefGenders.filter(isGender),
     ageMin: row.prefAgeMin,
     ageMax: row.prefAgeMax,
-    locations: locations(row.prefLocations),
+    cities: places(row.prefCities),
+    regions: places(row.prefRegions),
     languages: languages(row.prefLanguages),
     relaxAllowed: row.prefRelax,
   };
@@ -154,7 +153,8 @@ export interface IdentitySettingsData {
   prefGenders?: Gender[];
   prefAgeMin?: number | null;
   prefAgeMax?: number | null;
-  prefLocations?: LocationMode[];
+  prefCities?: string[];
+  prefRegions?: string[];
   prefLanguages?: Language[];
   prefRelax?: boolean;
 }
@@ -184,7 +184,8 @@ export function preferencesToColumns(search: SearchPreferences): IdentitySetting
     prefGenders: [...search.genders],
     prefAgeMin: search.ageMin,
     prefAgeMax: search.ageMax,
-    prefLocations: [...search.locations],
+    prefCities: [...search.cities],
+    prefRegions: [...search.regions],
     prefLanguages: [...search.languages],
     prefRelax: search.relaxAllowed,
   };

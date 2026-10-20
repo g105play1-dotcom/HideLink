@@ -395,9 +395,10 @@ save); auto-detecting the theme on every load without remembering the choice.
 for advertising, and asked for the layout to be *technically ready* for that. Nothing about
 advertising is decided: there is no provider, no creative, no money.
 
-**Decision.** Two container types exist as real, sized elements — `AdSlot variant="rail"` in the
-columns flanking the page (only on wide screens) and `AdSlot variant="chat-background"` as a layer
-inside the conversation card. Both paint nothing while they are empty, and both are `aria-hidden`.
+**Decision.** Three container types exist as real, sized elements — `AdSlot variant="rail"` in the
+columns flanking the page (only on wide screens), `AdSlot variant="banner"` in the space under the
+folded settings (D28), and `AdSlot variant="chat-background"` as a layer inside the conversation card.
+All paint nothing while they are empty, and all are `aria-hidden`.
 The chat card is `isolate relative` so the background layer paints *behind* the conversation rather
 than over it.
 
@@ -437,6 +438,10 @@ had deliberately blocked); an interface-only rule.
 
 ## D25. Every filter row is a list with an explicit "Любой", and "Где искать" is a set
 
+> **Superseded in part by D27** (2026-10-20): the place row no longer stores `city`/`region` modes but
+> names the places themselves. The general rule below — a list, an explicit «Любой» chip, and "any" as
+> the empty selection rather than a vocabulary member — still governs every filter row.
+
 **Context.** The owner read the new settings screen and asked two questions about its filter rows:
 why the "Пол собеседника" row had no "любой" button, and why "Где искать" was not the same kind of
 list, able to hold several answers at once. Both rows were, in effect, the same complaint: the
@@ -475,7 +480,7 @@ the neutral state implicit (the owner read an empty row as a missing control, an
 tell "not answered" from "answered: anything"); refusing to save until the city is declared (the
 filters are legitimately set before the profile, and the server accepts the filter either way).
 
-## D26. "Связаться с хозяином": a deliberate inbox with subsections, under a retention deadline
+## D26. "Связаться с администрацией": a deliberate inbox with subsections, under a retention deadline
 
 **Context.** The owner asked (2026-10-19) for a way for users to reach him, split into subsections
 (жалобы, предложения, реклама, сотрудничество и т.д.). Abuse reports already existed, but they are
@@ -505,6 +510,12 @@ cannot obtain one cannot write in — worth revisiting only if that ever becomes
 to write. There is **no** notification: the owner finds messages by opening the page, and an answer goes
 to whatever contact the sender chose to leave (or nowhere, if they left none).
 
+**Wording.** The interface says «администрация» (the owner asked on 2026-10-20 for a formal word instead
+of «хозяин», which his brief used), while the code and these documents say *owner* (`OwnerMessage`,
+`OwnerModule`): one principal under two names — the formal one where users read it, the engineering one
+where the boundary is defined. «Владелец» survives only as a description of who may open the archive,
+never as the name of the inbox.
+
 **Rejected.** Reusing `Report` with a nullable chat (a report is server-composed and tied to a message;
 merging would have forced one retention policy and one status machine on two different things);
 a free-text topic field (nothing to triage with, and the same word spelled five ways); requiring an
@@ -512,3 +523,64 @@ e-mail (a sign-up field in disguise, in a product whose point is that there is n
 with); e-mailing the owner (a delivery mechanism the service does not have, and a copy of every
 message outside its own retention); read/unread status (see above); making the route `@Anonymous()`
 (the rate limit and the "who wrote this" both become guesswork).
+
+## D27. "Где искать" names places, instead of comparing with the searcher's own
+
+**Context.** D25 made the place row a set of two *modes* — «Только мой город», «Только мой регион» —
+compared against the searcher's own declaration. The owner read the result (2026-10-20) and said it was
+still buttons rather than a list: keep the «Любой» chip, but let the city and the region be the same
+kind of multi-select as every other row, with a choice of several values.
+
+**Decision.** `SearchPreferences.locations: LocationMode[]` became two lists of names,
+`cities: readonly string[]` and `regions: readonly string[]`. The filter names the places a
+candidate's *declared* city or region has to be one of; the union of both lists is an **or**, so
+naming Moscow and Tatarstan accepts a candidate who matches either. An empty pair is "anywhere",
+exactly as D25 required — the neutral chip is still a value of the interface only, never of the wire.
+`preferencesFit` no longer takes the searcher's profile: with concrete names there is nothing to
+compare "mine" against, and the declared city/region remain the *candidate* side of the comparison.
+
+The columns moved with it: `prefLocations String[]` became `prefCities String[]` and
+`prefRegions String[]` (migration `20261019210000_search_place_lists`). A stored `'city'` mode is
+translated into the city the person had declared, and `'region'` into the declared region, so nobody's
+intent is lost; a mode chosen without a declared place meant "matches nobody" and now means
+"anywhere", which is the only honest translation and is stated in the migration. The rollback plan
+(re-create the modes when a list still names the declared place) is in the same file.
+
+**Consequences.** The "this filter cannot match anybody yet, because you have not declared your
+place" warning is gone: a name filter does not depend on the searcher's profile, so there is no such
+state. The interfaces are the same free-text-with-suggestions fields the declared city and region use,
+bounded by `PROFILE_LIMITS.PLACE_MAX_LENGTH` and `PLACE_FILTER_MAX` (10 names per list), with the
+folded comparison of `normalizePlace` — «Москва» and «москва » are one city, and the first spelling is
+what the user sees back. A typed-but-not-yet-added name is included when the user saves, because
+losing an unfinished entry silently is the same defect as a dead button.
+
+**Rejected.** Keeping the modes and merely drawing them as a list (they were already a multi-select;
+the owner's complaint was that the values were modes, not places); one combined list of "places" with
+an invisible kind flag (a city name that happens to equal a region name would silently match the other
+declaration, and the two are compared against different fields); geocoding or a canonical place
+vocabulary (the product compares what two people typed; a vocabulary would have to be complete and
+would make an unlisted town unsearchable); a list of *countries* (the profile has no such field, and
+inventing one changes what the declaration means).
+
+## D28. The space under the folded settings belongs to advertising
+
+**Context.** The owner noticed (2026-10-20) that folding the settings leaves a large empty area below
+the search button, and asked for it to be used by advertising rather than wasted. D23 had reserved the
+columns beside the page and the layer behind a conversation, but not this one.
+
+**Decision.** `AdSlot` gained a third variant, `banner`, rendered while the settings are closed in a
+container with `min-h-40 flex-1`: it takes exactly the height the settings panel would have occupied,
+so opening the settings never shifts a creative out of view and closing them never leaves a gap. The
+container is `aria-hidden` and paints nothing while empty, for the same reasons as the rails (D23) —
+an empty bordered box reads as a broken image, and an unfilled placeholder is not an ad.
+
+**Consequences.** The slot is a stable hook (`data-ad-slot="under-settings"`), so adding a creative is
+a change of content. The rules in `ad-slot.tsx` still apply unchanged: no word may be drawn on a
+creative, nothing renders when empty, and no third-party script enters the page without a new decision
+and an entry in `docs/SECURITY.md`. Advertising revenue remains an unproven assumption: no provider,
+no creative, no money, and no claim in the interface that any of it exists.
+
+**Rejected.** A visible "здесь может быть ваша реклама" box (the owner asked for the space to be used,
+not decorated, and D23 already rejected visible empty boxes); putting the slot *inside* the settings
+panel (it would be pushed down by the very content it is supposed to replace); showing a creative
+while the user is searching (the waiting screen is the one place where attention belongs to the wait).

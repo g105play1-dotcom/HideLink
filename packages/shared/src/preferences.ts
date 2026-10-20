@@ -51,21 +51,17 @@ export type Gender = (typeof GENDERS)[number];
 export const LANGUAGES = ['ru', 'en', 'uk', 'kk', 'de', 'fr', 'es', 'tr', 'zh', 'ar'] as const;
 export type Language = (typeof LANGUAGES)[number];
 
-/**
- * Where the searcher's own declared place constrains the candidate's.
- *
- * There is deliberately no `any` member: "anywhere" is the *empty* selection, exactly as
- * with the gender filter. A selectable "any" inside the vocabulary would be a value whose
- * meaning is "no value", and the two notions would eventually drift apart (the permission
- * "relax this criterion" would then have something to remove that was never a filter).
- * See docs/DECISIONS.md D25.
- */
-export const LOCATION_MODES = ['city', 'region'] as const;
-export type LocationMode = (typeof LOCATION_MODES)[number];
-
 export const PROFILE_LIMITS = {
   /** Longest accepted place name. Free text, but bounded. */
   PLACE_MAX_LENGTH: 64,
+  /**
+   * How many places one filter list may name.
+   *
+   * A bound, not a policy: the lists feed a multi-select over hints, and an unbounded
+   * payload is a payload nobody validated. Ten covers "все города, где у меня есть
+   * дела" and keeps the request small.
+   */
+  PLACE_FILTER_MAX: 10,
   BIRTH_YEAR_MIN: 1900,
   /**
    * Age-filter bounds are *technical*, not a policy.
@@ -102,23 +98,31 @@ export const EMPTY_PROFILE: DeclaredProfile = {
 };
 
 /**
- * How an identity wants its random partner to look.
+ * Where a random search looks, and what it must not assume.
  *
- * An empty array or a `null` bound means "no constraint", which is different from
- * "match someone who declared nothing" — see the module comment.
+ * The first version of this filter was two *modes* — «только мой город» and «только мой
+ * регион» — compared against the searcher's own declaration. The owner rejected that on
+ * 2026-10-20: the row has to be the same kind of list as the other filters, a multi-select
+ * of concrete places, with «Любой» as the neutral chip (docs/DECISIONS.md D27).
+ *
+ * So the filter names places, and the candidate's *declared* city/region is what it is
+ * compared against. The searcher's own declaration no longer takes part: "искать в
+ * Москве и Казани" does not depend on where the searcher lives.
  */
 export interface SearchPreferences {
   genders: readonly Gender[];
   ageMin: number | null;
   ageMax: number | null;
   /**
-   * Which of the searcher's own places a candidate has to share.
+   * City names a candidate's declared city must be one of. Empty = no constraint.
    *
-   * An empty selection is "anywhere". Selecting both is not the same as selecting
-   * `region` alone: it accepts a candidate who matches *either*, so someone who declared
-   * a city but no region satisfies the first and not the second.
+   * Compared through `normalizePlace`, and the union of `cities` and `regions` is an
+   * **or**: naming both accepts a candidate who matches either. A candidate who declared
+   * nothing never satisfies a place filter — guessing would match strangers.
    */
-  locations: readonly LocationMode[];
+  cities: readonly string[];
+  /** Region names, with the same rules as {@link cities}. */
+  regions: readonly string[];
   languages: readonly Language[];
   /**
    * Whether the server may drop filters, visibly, after a long wait.
@@ -133,7 +137,8 @@ export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
   genders: [],
   ageMin: null,
   ageMax: null,
-  locations: [],
+  cities: [],
+  regions: [],
   languages: [],
   relaxAllowed: false,
 };
@@ -144,7 +149,6 @@ export const DEFAULT_SEARCH_PREFERENCES: SearchPreferences = {
 
 export const genderSchema = z.enum(GENDERS);
 export const languageSchema = z.enum(LANGUAGES);
-export const locationModeSchema = z.enum(LOCATION_MODES);
 
 /**
  * Narrowing guards for data that comes *out* of storage rather than off the wire.
@@ -155,7 +159,6 @@ export const locationModeSchema = z.enum(LOCATION_MODES);
  */
 const GENDER_SET: ReadonlySet<string> = new Set(GENDERS);
 const LANGUAGE_SET: ReadonlySet<string> = new Set(LANGUAGES);
-const LOCATION_MODE_SET: ReadonlySet<string> = new Set(LOCATION_MODES);
 
 export function isGender(value: string): value is Gender {
   return GENDER_SET.has(value);
@@ -165,11 +168,19 @@ export function isLanguage(value: string): value is Language {
   return LANGUAGE_SET.has(value);
 }
 
-export function isLocationMode(value: string): value is LocationMode {
-  return LOCATION_MODE_SET.has(value);
-}
-
 const placeSchema = z.string().trim().min(1).max(PROFILE_LIMITS.PLACE_MAX_LENGTH);
+
+/**
+ * A list of place names, as stored in one filter column.
+ *
+ * A stored list goes through `normalizePlaces`, which drops unusable entries and
+ * duplicates: a row written before a bound changed, or edited by hand, must not make the
+ * matchmaker compare against a value no request could have produced.
+ */
+const placeFilterSchema = z
+  .array(placeSchema)
+  .max(PROFILE_LIMITS.PLACE_FILTER_MAX)
+  .transform((values) => normalizePlaces(values));
 
 /**
  * Year of birth. The upper bound is "this year" rather than a constant, so the schema
@@ -203,7 +214,8 @@ export const searchPreferencesSchema = z
     genders: z.array(genderSchema).max(GENDERS.length),
     ageMin: z.number().int().min(PROFILE_LIMITS.AGE_MIN).max(PROFILE_LIMITS.AGE_MAX).nullable(),
     ageMax: z.number().int().min(PROFILE_LIMITS.AGE_MIN).max(PROFILE_LIMITS.AGE_MAX).nullable(),
-    locations: z.array(locationModeSchema).max(LOCATION_MODES.length),
+    cities: placeFilterSchema,
+    regions: placeFilterSchema,
     languages: z.array(languageSchema).max(LANGUAGES.length),
     relaxAllowed: z.boolean(),
   })
@@ -247,7 +259,8 @@ export const searchPreferencesUpdateSchema = z
       .max(PROFILE_LIMITS.AGE_MAX)
       .nullable()
       .optional(),
-    locations: z.array(locationModeSchema).max(LOCATION_MODES.length).optional(),
+    cities: placeFilterSchema.optional(),
+    regions: placeFilterSchema.optional(),
     languages: z.array(languageSchema).max(LANGUAGES.length).optional(),
     relaxAllowed: z.boolean().optional(),
   })
@@ -294,6 +307,39 @@ export function normalizePlace(value: string | null | undefined): string | null 
 }
 
 /**
+ * A place filter, made comparable.
+ *
+ * Deduplicates by `normalizePlace` — "Москва" and "москва " are one city — keeps the
+ * first spelling as typed (the interface shows the user's own words back), and drops
+ * values that normalize to nothing. An empty result is legitimate: it means "anywhere".
+ */
+export function normalizePlaces(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const normalized = normalizePlace(value);
+    if (normalized === null || seen.has(normalized)) continue;
+    seen.add(normalized);
+    result.push(value.trim());
+  }
+
+  return result;
+}
+
+/** The names in a filter list, folded for comparison. */
+function placeSet(values: readonly string[]): Set<string> {
+  const set = new Set<string>();
+
+  for (const value of values) {
+    const normalized = normalizePlace(value);
+    if (normalized !== null) set.add(normalized);
+  }
+
+  return set;
+}
+
+/**
  * Age implied by a declared year of birth.
  *
  * Year granularity, not days: the input is a year the user typed, so anything more
@@ -320,15 +366,16 @@ export function birthYearFromAge(age: number, now: Date = new Date()): number {
 }
 
 /**
- * Whether `candidate` satisfies `prefs`, given the searcher's own declaration (needed
- * for the "same city as me" modes).
+ * Whether `candidate` satisfies `prefs`.
  *
- * Every unmet or *unverifiable* condition returns `false`; see the module comment.
+ * The searcher's own declaration plays no part: every filter names what it wants (a
+ * gender, an age, a list of places), which is also why this function no longer takes a
+ * second profile. Every unmet or *unverifiable* condition returns `false`; see the
+ * module comment.
  */
 export function preferencesFit(
   prefs: SearchPreferences,
   candidate: DeclaredProfile,
-  searcher: DeclaredProfile,
   now: Date = new Date(),
 ): boolean {
   if (prefs.genders.length > 0) {
@@ -343,18 +390,20 @@ export function preferencesFit(
     if (prefs.ageMax !== null && age > prefs.ageMax) return false;
   }
 
-  if (prefs.locations.length > 0) {
-    // "One of the places I named", not "all of them": selecting both is a wider search
-    // than selecting either, which is what a multi-select has to mean.
-    const sharesAPlace = prefs.locations.some((mode) => {
-      const mine = normalizePlace(mode === 'city' ? searcher.city : searcher.region);
-      const theirs = normalizePlace(mode === 'city' ? candidate.city : candidate.region);
+  if (prefs.cities.length > 0 || prefs.regions.length > 0) {
+    // "One of the places I named", not "all of them": the two lists — and the names
+    // inside each — form one union, so naming Moscow and Tatarstan accepts a candidate
+    // who matches either. Declaring nothing cannot satisfy a place filter: guessing
+    // would match strangers.
+    const cities = placeSet(prefs.cities);
+    const regions = placeSet(prefs.regions);
+    const candidateCity = normalizePlace(candidate.city);
+    const candidateRegion = normalizePlace(candidate.region);
 
-      // Declaring nothing cannot satisfy "same as mine": guessing would match strangers.
-      return mine !== null && theirs !== null && mine === theirs;
-    });
+    const matchesCity = candidateCity !== null && cities.has(candidateCity);
+    const matchesRegion = candidateRegion !== null && regions.has(candidateRegion);
 
-    if (!sharesAPlace) return false;
+    if (!matchesCity && !matchesRegion) return false;
   }
 
   if (prefs.languages.length > 0) {
@@ -379,8 +428,7 @@ export interface MatchSide {
  */
 export function mutuallyCompatible(a: MatchSide, b: MatchSide, now: Date = new Date()): boolean {
   return (
-    preferencesFit(a.preferences, b.profile, a.profile, now) &&
-    preferencesFit(b.preferences, a.profile, b.profile, now)
+    preferencesFit(a.preferences, b.profile, now) && preferencesFit(b.preferences, a.profile, now)
   );
 }
 
@@ -427,7 +475,7 @@ function criterionIsSet(prefs: SearchPreferences, criterion: RelaxableCriterion)
     case 'age':
       return prefs.ageMin !== null || prefs.ageMax !== null;
     case 'location':
-      return prefs.locations.length > 0;
+      return prefs.cities.length > 0 || prefs.regions.length > 0;
     case 'languages':
       return prefs.languages.length > 0;
   }
@@ -441,7 +489,7 @@ function dropCriterion(prefs: SearchPreferences, criterion: RelaxableCriterion):
     case 'age':
       return { ...prefs, ageMin: null, ageMax: null };
     case 'location':
-      return { ...prefs, locations: [] };
+      return { ...prefs, cities: [], regions: [] };
     case 'languages':
       return { ...prefs, languages: [] };
   }

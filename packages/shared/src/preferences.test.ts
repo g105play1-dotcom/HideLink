@@ -9,6 +9,7 @@ import {
   hasActiveFilters,
   mutuallyCompatible,
   normalizePlace,
+  normalizePlaces,
   preferencesFit,
   profileUpdateSchema,
   relaxBySteps,
@@ -48,6 +49,17 @@ describe('normalizePlace', () => {
   });
 });
 
+describe('normalizePlaces', () => {
+  it('deduplicates a filter by the folded spelling and keeps the first as typed', () => {
+    // The user sees their own words back; comparison happens on the folded form.
+    expect(normalizePlaces(['Москва', 'москва ', 'Казань'])).toEqual(['Москва', 'Казань']);
+  });
+
+  it('drops blanks instead of storing a name that matches nothing', () => {
+    expect(normalizePlaces(['   ', ''])).toEqual([]);
+  });
+});
+
 describe('ageFromBirthYear', () => {
   it('is year-granular, matching what the user actually typed', () => {
     expect(ageFromBirthYear(1990, NOW)).toBe(36);
@@ -71,99 +83,87 @@ describe('birthYearFromAge', () => {
 });
 
 describe('preferencesFit', () => {
-  const searcher = profile({ city: 'Казань', region: 'Татарстан', languages: ['ru'] });
-
   it('accepts anyone when nothing is filtered', () => {
-    expect(preferencesFit(prefs(), profile(), searcher, NOW)).toBe(true);
+    expect(preferencesFit(prefs(), profile(), NOW)).toBe(true);
   });
 
   it('requires a declaration when a gender filter is set', () => {
-    expect(
-      preferencesFit(prefs({ genders: ['female'] }), profile({ gender: 'female' }), searcher, NOW),
-    ).toBe(true);
-    expect(
-      preferencesFit(prefs({ genders: ['female'] }), profile({ gender: 'male' }), searcher, NOW),
-    ).toBe(false);
+    expect(preferencesFit(prefs({ genders: ['female'] }), profile({ gender: 'female' }), NOW)).toBe(
+      true,
+    );
+    expect(preferencesFit(prefs({ genders: ['female'] }), profile({ gender: 'male' }), NOW)).toBe(
+      false,
+    );
     // Undeclared is not "probably fine".
-    expect(preferencesFit(prefs({ genders: ['female'] }), profile(), searcher, NOW)).toBe(false);
+    expect(preferencesFit(prefs({ genders: ['female'] }), profile(), NOW)).toBe(false);
   });
 
   it('requires a declared year of birth when an age range is set', () => {
     const range = prefs({ ageMin: 25, ageMax: 35 });
 
-    expect(preferencesFit(range, profile({ birthYear: 1995 }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(range, profile({ birthYear: 1970 }), searcher, NOW)).toBe(false);
-    expect(preferencesFit(range, profile({ birthYear: 2010 }), searcher, NOW)).toBe(false);
-    expect(preferencesFit(range, profile(), searcher, NOW)).toBe(false);
+    expect(preferencesFit(range, profile({ birthYear: 1995 }), NOW)).toBe(true);
+    expect(preferencesFit(range, profile({ birthYear: 1970 }), NOW)).toBe(false);
+    expect(preferencesFit(range, profile({ birthYear: 2010 }), NOW)).toBe(false);
+    expect(preferencesFit(range, profile(), NOW)).toBe(false);
   });
 
   it('applies a single-sided age bound', () => {
-    expect(preferencesFit(prefs({ ageMin: 30 }), profile({ birthYear: 1990 }), searcher, NOW)).toBe(
-      true,
-    );
-    expect(preferencesFit(prefs({ ageMin: 30 }), profile({ birthYear: 2005 }), searcher, NOW)).toBe(
-      false,
-    );
-    expect(preferencesFit(prefs({ ageMax: 30 }), profile({ birthYear: 2005 }), searcher, NOW)).toBe(
-      true,
-    );
+    expect(preferencesFit(prefs({ ageMin: 30 }), profile({ birthYear: 1990 }), NOW)).toBe(true);
+    expect(preferencesFit(prefs({ ageMin: 30 }), profile({ birthYear: 2005 }), NOW)).toBe(false);
+    expect(preferencesFit(prefs({ ageMax: 30 }), profile({ birthYear: 2005 }), NOW)).toBe(true);
   });
 
-  it("compares the candidate against the searcher's own declared place", () => {
-    const sameCity = prefs({ locations: ['city'] });
+  it('matches the city names the filter lists, however they are typed', () => {
+    const kazan = prefs({ cities: ['Казань'] });
 
-    expect(preferencesFit(sameCity, profile({ city: 'казань' }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(sameCity, profile({ city: 'Москва' }), searcher, NOW)).toBe(false);
-    expect(preferencesFit(sameCity, profile(), searcher, NOW)).toBe(false);
+    // Case and spacing are folded the same way as on the declared side.
+    expect(preferencesFit(kazan, profile({ city: 'казань' }), NOW)).toBe(true);
+    expect(preferencesFit(kazan, profile({ city: '  Казань ' }), NOW)).toBe(true);
+    expect(preferencesFit(kazan, profile({ city: 'Москва' }), NOW)).toBe(false);
 
-    // The searcher never declared a city, so "same city as me" can hold for nobody.
-    expect(preferencesFit(sameCity, profile({ city: 'Казань' }), profile(), NOW)).toBe(false);
+    // Declaring nothing never satisfies a place filter: guessing would match strangers.
+    expect(preferencesFit(kazan, profile(), NOW)).toBe(false);
   });
 
-  it('uses the region for the region mode', () => {
-    const sameRegion = prefs({ locations: ['region'] });
+  it('matches regions independently of cities', () => {
+    const tatarstan = prefs({ regions: ['Татарстан'] });
 
     expect(
-      preferencesFit(
-        sameRegion,
-        profile({ city: 'Набережные Челны', region: 'Татарстан' }),
-        searcher,
-        NOW,
-      ),
+      preferencesFit(tatarstan, profile({ city: 'Набережные Челны', region: 'Татарстан' }), NOW),
     ).toBe(true);
-    expect(preferencesFit(sameRegion, profile({ region: 'Башкортостан' }), searcher, NOW)).toBe(
-      false,
-    );
+    expect(preferencesFit(tatarstan, profile({ region: 'Башкортостан' }), NOW)).toBe(false);
+    // A city is not a region: the two lists are compared against different declarations.
+    expect(preferencesFit(tatarstan, profile({ city: 'Татарстан' }), NOW)).toBe(false);
   });
 
-  it('accepts a candidate matching *either* selected place, which is wider than one', () => {
-    const both = prefs({ locations: ['city', 'region'] });
-    const abroad = profile({ city: 'Москва', region: 'Москва' });
+  it('accepts a candidate matching *either* list, because several places are one wider search', () => {
+    const both = prefs({ cities: ['Казань'], regions: ['Татарстан'] });
 
-    // A peer who declared a city but no region: the city matches, the region does not, so
-    // selecting both is strictly more permissive than selecting «только мой регион».
-    expect(preferencesFit(both, profile({ city: 'Казань' }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(both, profile({ region: 'Татарстан' }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(both, abroad, searcher, NOW)).toBe(false);
+    // A peer who declared a city but no region matches the city list and not the region
+    // one; selecting both is strictly more permissive than selecting either.
+    expect(preferencesFit(both, profile({ city: 'Казань' }), NOW)).toBe(true);
+    expect(preferencesFit(both, profile({ region: 'Татарстан' }), NOW)).toBe(true);
+    expect(preferencesFit(both, profile({ city: 'Москва', region: 'Москва' }), NOW)).toBe(false);
 
+    // Several names inside one list are a union too, not an intersection.
     expect(
-      preferencesFit(prefs({ locations: ['region'] }), profile({ city: 'Казань' }), searcher, NOW),
-    ).toBe(false);
+      preferencesFit(prefs({ cities: ['Казань', 'Москва'] }), profile({ city: 'Москва' }), NOW),
+    ).toBe(true);
   });
 
-  it('treats an empty selection as "anywhere"', () => {
-    // The neutral state is the absence of the list, not a stored "any" value: the
-    // vocabulary has no member for it (docs/DECISIONS.md D25).
-    expect(preferencesFit(prefs(), profile({ city: 'Москва' }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(prefs(), profile(), searcher, NOW)).toBe(true);
+  it('treats empty place lists as "anywhere"', () => {
+    // The neutral state is the absence of the names, not a stored "any" value: the
+    // filter has no vocabulary member for it (docs/DECISIONS.md D25/D27).
+    expect(preferencesFit(prefs(), profile({ city: 'Москва' }), NOW)).toBe(true);
+    expect(preferencesFit(prefs({ cities: [], regions: [] }), profile(), NOW)).toBe(true);
   });
 
   it('needs at least one shared language', () => {
     const wants = prefs({ languages: ['en', 'de'] });
 
-    expect(preferencesFit(wants, profile({ languages: ['de'] }), searcher, NOW)).toBe(true);
-    expect(preferencesFit(wants, profile({ languages: ['ru'] }), searcher, NOW)).toBe(false);
-    expect(preferencesFit(wants, profile(), searcher, NOW)).toBe(false);
+    expect(preferencesFit(wants, profile({ languages: ['de'] }), NOW)).toBe(true);
+    expect(preferencesFit(wants, profile({ languages: ['ru'] }), NOW)).toBe(false);
+    expect(preferencesFit(wants, profile(), NOW)).toBe(false);
   });
 
   it('combines every filter as an AND', () => {
@@ -171,7 +171,7 @@ describe('preferencesFit', () => {
       genders: ['female'],
       ageMin: 25,
       ageMax: 35,
-      locations: ['city'],
+      cities: ['Казань'],
       languages: ['ru'],
     });
     const ideal = profile({
@@ -181,8 +181,8 @@ describe('preferencesFit', () => {
       languages: ['ru', 'en'],
     });
 
-    expect(preferencesFit(strict, ideal, searcher, NOW)).toBe(true);
-    expect(preferencesFit(strict, { ...ideal, city: 'Москва' }, searcher, NOW)).toBe(false);
+    expect(preferencesFit(strict, ideal, NOW)).toBe(true);
+    expect(preferencesFit(strict, { ...ideal, city: 'Москва' }, NOW)).toBe(false);
   });
 });
 
@@ -223,7 +223,7 @@ describe('relaxation', () => {
     genders: ['female'],
     ageMin: 25,
     ageMax: 35,
-    locations: ['city'],
+    cities: ['Казань'],
     languages: ['ru'],
   });
 
@@ -233,7 +233,7 @@ describe('relaxation', () => {
     const one = relaxBySteps(strict, 1);
     expect(one.dropped).toEqual(['languages']);
     expect(one.criteria.languages).toEqual([]);
-    expect(one.criteria.locations).toEqual(['city']);
+    expect(one.criteria.cities).toEqual(['Казань']);
     expect(one.criteria.ageMin).toBe(25);
     expect(one.criteria.genders).toEqual(['female']);
 
@@ -298,7 +298,8 @@ describe('schemas', () => {
       genders: ['female', 'male'],
       ageMin: 18,
       ageMax: 99,
-      locations: ['region'],
+      cities: ['Казань'],
+      regions: [],
       languages: ['ru', 'en'],
       relaxAllowed: true,
     });
@@ -331,12 +332,28 @@ describe('schemas', () => {
     expect(searchPreferencesUpdateSchema.safeParse({ nested: {} }).success).toBe(false);
   });
 
-  it('no longer accepts "any" as a place mode, because "anywhere" is the empty list', () => {
-    // A stored "any" would be a value that means "no value", and the relaxation step
-    // ("drop the place filter") would have two ways to express one state
-    // (docs/DECISIONS.md D25).
+  it('refuses the retired place modes, because a place filter names places', () => {
+    // The filter used to store `city`/`region` modes; a client that still sends them is
+    // refused rather than half-honoured (`strict()`), and "anywhere" is the empty list
+    // (docs/DECISIONS.md D27).
     expect(searchPreferencesUpdateSchema.safeParse({ locations: ['any'] }).success).toBe(false);
-    expect(searchPreferencesUpdateSchema.safeParse({ locations: [] }).success).toBe(true);
+    expect(searchPreferencesUpdateSchema.safeParse({ locations: ['city'] }).success).toBe(false);
+    expect(searchPreferencesUpdateSchema.safeParse({ cities: [] }).success).toBe(true);
+  });
+
+  it('bounds each place list and drops duplicates by the folded spelling', () => {
+    const many = Array.from({ length: 11 }, (_, index) => `Город ${index}`);
+
+    expect(searchPreferencesUpdateSchema.safeParse({ cities: many.slice(0, 10) }).success).toBe(
+      true,
+    );
+    expect(searchPreferencesUpdateSchema.safeParse({ cities: many }).success).toBe(false);
+    expect(searchPreferencesUpdateSchema.safeParse({ cities: ['   '] }).success).toBe(false);
+
+    const deduped = searchPreferencesUpdateSchema.safeParse({
+      cities: ['Москва', 'москва ', 'Казань'],
+    });
+    expect(deduped.success && deduped.data.cities).toEqual(['Москва', 'Казань']);
   });
 
   it('no longer accepts "other" as a gender', () => {

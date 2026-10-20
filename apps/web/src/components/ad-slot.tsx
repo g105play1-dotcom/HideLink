@@ -5,9 +5,9 @@ import { cn } from '@/lib/utils';
  *
  * AnonLink serves no advertising today and loads no third-party code. These slots exist
  * because the owner asked for the layout to be *ready* for it: the empty columns beside
- * the page and the layer behind a conversation are now real, sized containers, so adding
- * a creative later is a change of content rather than a change of layout
- * (docs/DECISIONS.md D23).
+ * the page, the space under the folded settings and the layer behind a conversation are
+ * now real, sized containers, so adding a creative later is a change of content rather
+ * than a change of layout (docs/DECISIONS.md D23/D28).
  *
  * ## Rules a creative must satisfy
  *
@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils';
 export type AdSlotVariant =
   /** A column beside the page content, for a skyscraper/vertical creative. */
   | 'rail'
+  /** The space under the folded settings, for a wide banner. */
+  | 'banner'
   /** The layer behind a conversation, for a full-bleed background creative. */
   | 'chat-background';
 
@@ -41,6 +43,7 @@ export function AdSlot({ variant, className }: { variant: AdSlotVariant; classNa
       data-ad-slot={variant}
       className={cn(
         variant === 'chat-background' && 'pointer-events-none absolute inset-0',
+        variant === 'banner' && 'h-full w-full',
         className,
       )}
     />

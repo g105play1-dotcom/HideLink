@@ -25,28 +25,30 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 4 | **83** | pure unit |
+| `packages/shared` | 4 | **86** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
 | `apps/api` | 12 | **159** | 26 unit + 133 integration |
 | `tests/e2e` | 9 | **26** | browser, two independent contexts |
-| **Total** | **26** | **276** | |
+| **Total** | **26** | **279** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10) run
 without a server; the ten integration files start a **real API process on port 3101** against the
 `*_test` database.
 
-**Last full run (2026-10-19, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `26 passed (2.1m)`. The browser suite
+**Last full run (2026-10-20, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `26 passed (3.0m)`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
 ## 3. Unit suites
 
-**`packages/shared` (83)** — the rules both ends depend on, so they are tested once, here:
+**`packages/shared` (86)** — the rules both ends depend on, so they are tested once, here:
 
-- `preferences.test.ts` (33) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
-  folding (`Королёв` ≡ `  королев`), the relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`,
-  `relaxationStage`), and that an undeclared value never satisfies a filter.
+- `preferences.test.ts` (36) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
+  folding (`Королёв` ≡ `  королев`) and the deduplication of a place list (`normalizePlaces`), the
+  relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`, `relaxationStage`), and that an
+  undeclared value never satisfies a filter — including a place filter that names cities and regions
+  (an **or** across both lists, and never the searcher's own declaration).
 - `ids.test.ts` (18) — `generatePublicId` shape (`AL` + 12 Crockford Base32), `normalizePublicId`
   accepting look-alikes (`O`→`0`, `I`/`L`→`1`, case), `isValidPublicId` rejecting malformed input.
 - `schemas.test.ts` (19) — every Zod input contract, including the age-range `.refine`, unknown-field
@@ -77,10 +79,10 @@ Each file below runs against the live process; the descriptions are the guarante
 | `direct.test.ts` | 15 | Direct request delivery (sender ID disclosed because it is reciprocal), note length, unknown/self/malformed target, offline target, requests-off target, **blocked target refused without saying so**, blocked while in a chat, cancel on disconnect; accept (both IDs revealed), decline, wrong addressee, double answer, second-chat refusal |
 | `moderation.test.ts` | 9 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
 | `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
-| `search-filters.test.ts` | 10 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user |
+| `search-filters.test.ts` | 10 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown fields rejected, profile round-trip never exposed to another user |
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
 | `protocol.test.ts` | 10 | The nine client events are declared and each is routed to a handler |
-| `owner-messages.test.ts` | 7 | "Связаться с хозяином": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
+| `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
 
 Two deliberate test-environment switches make these deterministic and are the reason some behaviours
 are *not* covered here (`apps/api/test/support/test-env.ts`): `MATCH_RELAX_AFTER_MS=0` and
@@ -103,13 +105,13 @@ exactly one, non-secret, machine-independent way.
 | Spec | Tests | Focus |
 | --- | --- | --- |
 | `matching.spec.ts` | 4 | Random match and bidirectional messages; ending a chat with distinct reasons for both sides; "next" starting a clean conversation; cancelling a search with a running timer |
-| `filters.spec.ts` | 3 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; an impossible age range refused in the UI |
+| `filters.spec.ts` | 3 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities and a region round-tripping through the server; an impossible age range refused in the UI |
 | `direct.spec.ts` | 4 | Request sent/accepted; request declined; incoming requests disabled (and the setting surviving a reload); self-request refused |
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
 | `admin.spec.ts` | 3 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept |
-| `contact-owner.spec.ts` | 1 | "Связаться с хозяином": the form offers every subsection, keeps "Отправить хозяину" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
+| `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
 
 `admin.spec.ts` is the newest, and it was written *after* the fact rather than before it. Using the

@@ -169,36 +169,53 @@ test.describe('filtered search', () => {
       'true',
     );
 
-    // Two places at once is the point of the row being a list rather than a choice.
+    // Two cities and a region at once is the point of the row being a list rather than a
+    // choice: each is typed by hand and kept as its own chip.
     await togglePartnerGender(alice.page, 'Женский');
-    await placeRow.getByRole('button', { name: 'Только мой город', exact: true }).click();
-    await placeRow.getByRole('button', { name: 'Только мой регион', exact: true }).click();
 
-    // She has declared no place of her own, so the filter can match nobody yet. Said out
-    // loud, because a filter that silently matches nothing is indistinguishable from a
-    // broken search.
-    await expect(panel.getByText(/не указан город и регион/)).toBeVisible();
+    const cities = placeRow.getByLabel('Города', { exact: true });
+    const regions = placeRow.getByLabel('Регионы', { exact: true });
+
+    await cities.fill('Москва');
+    await cities.press('Enter');
+    await cities.fill('Казань');
+    await placeRow.getByRole('button', { name: 'Добавить город', exact: true }).click();
+    await regions.fill('Татарстан');
+    await regions.press('Enter');
+
+    await expect(
+      placeRow.getByRole('button', { name: 'Убрать Москва', exact: true }),
+    ).toBeVisible();
+    await expect(
+      placeRow.getByRole('button', { name: 'Убрать Татарстан', exact: true }),
+    ).toBeVisible();
+    await expect(placeRow.getByRole('button', { name: 'Любой', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
 
     await saveFilters(alice.page);
     await closeSettings(alice.page);
 
     // The applied filters come from the server, so this is the round trip and not the form.
     await expect(alice.page.getByText('Пол: Женский')).toBeVisible();
-    await expect(alice.page.getByText('Только мой город')).toBeVisible();
-    await expect(alice.page.getByText('Только мой регион')).toBeVisible();
+    await expect(alice.page.getByText('Города: Москва, Казань')).toBeVisible();
+    await expect(alice.page.getByText('Регионы: Татарстан')).toBeVisible();
 
     await openSettings(alice.page);
     await genderRow.getByRole('button', { name: 'Любой', exact: true }).click();
     await placeRow.getByRole('button', { name: 'Любой', exact: true }).click();
-    await expect(panel.getByText(/не указан город и регион/)).toHaveCount(0);
+    await expect(placeRow.getByRole('button', { name: 'Убрать Москва', exact: true })).toHaveCount(
+      0,
+    );
 
     await saveFilters(alice.page);
     await closeSettings(alice.page);
 
     await expect(alice.page.getByText('Без фильтров — подойдёт любой собеседник.')).toBeVisible();
     await expect(alice.page.getByText('Пол: Женский')).toHaveCount(0);
-    await expect(alice.page.getByText('Только мой город')).toHaveCount(0);
-    await expect(alice.page.getByText('Только мой регион')).toHaveCount(0);
+    await expect(alice.page.getByText('Города: Москва, Казань')).toHaveCount(0);
+    await expect(alice.page.getByText('Регионы: Татарстан')).toHaveCount(0);
 
     expectNoClientErrors(alice);
   });

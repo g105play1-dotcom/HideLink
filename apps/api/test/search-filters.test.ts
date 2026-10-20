@@ -173,10 +173,7 @@ describe('filtered random search', () => {
   });
 
   it('compares declared places after folding case, spacing and ё/е — and nothing more', async () => {
-    const seeker = await participant({
-      profile: { city: 'Королёв' },
-      search: { locations: ['city'] },
-    });
+    const seeker = await participant({ search: { cities: ['Королёв'] } });
     const anotherCity = await participant({ profile: { city: 'Москва' } });
 
     await join(seeker);
@@ -191,14 +188,11 @@ describe('filtered random search', () => {
     await started;
   });
 
-  it('accepts a peer matching either of two selected places', async () => {
-    const seeker = await participant({
-      profile: { city: 'Казань', region: 'Татарстан' },
-      search: { locations: ['city', 'region'] },
-    });
+  it('accepts a peer matching any of the named places', async () => {
+    const seeker = await participant({ search: { cities: ['Казань'], regions: ['Татарстан'] } });
 
-    // City declared, region not: the union accepts them, and «только мой регион» alone
-    // would have refused — which is why the filter is a set and not a single mode.
+    // City declared, region not: the union accepts them, and a region-only filter would
+    // have refused — which is why the row is a list and not a single choice.
     const cityOnly = await participant({ profile: { city: 'Казань' } });
 
     await join(seeker);
@@ -295,7 +289,7 @@ describe('filter and profile validation', () => {
         genders: ['male'],
         ageMin: 25,
         ageMax: 45,
-        locations: ['city'],
+        cities: ['Москва'],
         languages: ['ru'],
         relaxAllowed: true,
       },
@@ -305,6 +299,7 @@ describe('filter and profile validation', () => {
     expect(saved.body.settings.profile.city).toBe('Москва');
     expect(saved.body.settings.profile.languages).toEqual(['ru']);
     expect(saved.body.settings.search.ageMin).toBe(25);
+    expect(saved.body.settings.search.cities).toEqual(['Москва']);
     expect(saved.body.settings.search.relaxAllowed).toBe(true);
 
     // Knowing somebody's User ID must not reveal a single thing about how they describe
@@ -327,7 +322,7 @@ describe('filter and profile validation', () => {
     const client = await RealtimeClient.connect(identity);
     open.push(client);
 
-    const good = await patchSettings(identity, { search: { locations: ['region'], ageMin: 20 } });
+    const good = await patchSettings(identity, { search: { regions: ['Татарстан'], ageMin: 20 } });
     expect(good.status).toBe(200);
 
     const bad = await patchSettingsExpectingFailure(identity, { search: { ageMax: 19 } });
@@ -336,7 +331,7 @@ describe('filter and profile validation', () => {
     const current = await http<{ authenticated: boolean; session: SessionView }>('/session', {
       cookie: identity.cookie,
     });
-    expect(current.body.session.settings.search.locations).toEqual(['region']);
+    expect(current.body.session.settings.search.regions).toEqual(['Татарстан']);
     expect(current.body.session.settings.search.ageMin).toBe(20);
     expect(current.body.session.settings.search.ageMax).toBeNull();
   });

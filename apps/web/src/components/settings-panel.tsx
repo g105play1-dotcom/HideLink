@@ -5,7 +5,7 @@ import {
   birthYearFromAge,
   GENDERS,
   LANGUAGES,
-  LOCATION_MODES,
+  normalizePlace,
   PROFILE_LIMITS,
   profileUpdateSchema,
   searchPreferencesSchema,
@@ -13,7 +13,6 @@ import {
   type Gender,
   type IncomingRequestPolicy,
   type Language,
-  type LocationMode,
   type ProfileUpdate,
   type SearchPreferences,
   type SessionView,
@@ -39,7 +38,7 @@ import { CITY_SUGGESTIONS, REGION_SUGGESTIONS } from '@/data/places';
 import { client } from '@/lib/anonymous-client';
 import { describeError } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
-import { GENDER_LABELS, LANGUAGE_LABELS, LOCATION_LABELS, describeCriteria } from '@/lib/labels';
+import { GENDER_LABELS, LANGUAGE_LABELS, describeCriteria } from '@/lib/labels';
 import { cn } from '@/lib/utils';
 import { useAppStore, type SessionInfo } from '@/store/app-store';
 
@@ -233,8 +232,139 @@ function LanguagePicker({
   );
 }
 
-/** Empty input means "no bound"; anything else must be a whole number. */
-function parseBound(raw: string): number | null {
+/**
+ * Adds a typed place to a filter list.
+ *
+ * The same spelling twice is one place, compared the way the matchmaker compares it
+ * (`normalizePlace`), so a duplicate is ignored rather than shown and sent twice. A full
+ * list takes nothing more: the field is disabled by then, and the server enforces the
+ * same bound. Pure, so the save path can use it on a draft the user has not submitted.
+ */
+function addPendingPlace(list: readonly string[], draft: string): string[] {
+  const value = draft.trim();
+
+  if (value === '' || list.length >= PROFILE_LIMITS.PLACE_FILTER_MAX) return [...list];
+
+  const folded = normalizePlace(value);
+  if (folded === null || list.some((item) => normalizePlace(item) === folded)) return [...list];
+
+  return [...list, value];
+}
+
+/**
+ * A multi-select of place names: type, or pick from the same suggestions the declared
+ * city and region use, then add.
+ *
+ * Not a `<select multiple>`: a place is free text the two people have to spell the same
+ * way, not a member of a vocabulary, and the owner asked for a list with manual input —
+ * the same treatment as the declared city and region, with several values (D22/D27).
+ * Enter adds as well as the button, because a field with an "add" button is a form people
+ * try to submit with the keyboard.
+ *
+ * The draft lives in the parent: "Сохранить фильтры" saves whatever is typed but not yet
+ * added, so a half-finished entry can never be silently dropped.
+ */
+function PlacePicker({
+  id,
+  legend,
+  values,
+  draft,
+  options,
+  addLabel,
+  placeholder,
+  emptyHint,
+  onDraftChange,
+  onAdd,
+  onRemove,
+  disabled,
+}: {
+  id: string;
+  legend: string;
+  values: readonly string[];
+  draft: string;
+  options: readonly string[];
+  addLabel: string;
+  placeholder: string;
+  emptyHint: string;
+  onDraftChange: (value: string) => void;
+  onAdd: () => void;
+  onRemove: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const full = values.length >= PROFILE_LIMITS.PLACE_FILTER_MAX;
+
+  return (
+    <fieldset className="flex flex-col gap-1.5" disabled={disabled}>
+      <legend className="text-sm font-medium">{legend}</legend>
+
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          aria-label={legend}
+          className="min-w-0 flex-1"
+          list={`${id}-suggestions`}
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              onAdd();
+            }
+          }}
+          placeholder={placeholder}
+          maxLength={PROFILE_LIMITS.PLACE_MAX_LENGTH}
+          disabled={disabled || full}
+          autoComplete="off"
+        />
+        <datalist id={`${id}-suggestions`}>
+          {options.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
+        <Button
+          type="button"
+          variant="outline"
+          className="shrink-0"
+          aria-label={addLabel}
+          onClick={onAdd}
+          disabled={disabled || full || draft.trim().length === 0}
+        >
+          Добавить
+        </Button>
+      </div>
+
+      {values.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {values.map((value) => (
+            <li key={value}>
+              <button
+                type="button"
+                onClick={() => onRemove(value)}
+                aria-label={`Убрать ${value}`}
+                className={cn(chipClass(true), 'flex items-center gap-1.5')}
+              >
+                {value}
+                <X className="size-3.5 text-muted-foreground" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">{emptyHint}</p>
+      )}
+
+      {full ? (
+        <p className="text-xs text-muted-foreground">
+          Не больше {PROFILE_LIMITS.PLACE_FILTER_MAX} названий в одном списке.
+        </p>
+      ) : null}
+    </fieldset>
+  );
+}
+
+/** Empty input means "no bound"; anything else must be a whole number. */ function parseBound(
+  raw: string,
+): number | null {
   const trimmed = raw.trim();
   if (trimmed === '') return null;
 
@@ -440,15 +570,25 @@ function FiltersSection({ session }: { session: SessionInfo }) {
   const [genders, setGenders] = useState<Gender[]>([...session.search.genders]);
   const [ageMin, setAgeMin] = useState(boundValue(session.search.ageMin));
   const [ageMax, setAgeMax] = useState(boundValue(session.search.ageMax));
-  const [locations, setLocations] = useState<LocationMode[]>([...session.search.locations]);
+  const [cities, setCities] = useState<string[]>([...session.search.cities]);
+  const [regions, setRegions] = useState<string[]>([...session.search.regions]);
   const [languages, setLanguages] = useState<Language[]>([...session.search.languages]);
   const [relaxAllowed, setRelaxAllowed] = useState(session.search.relaxAllowed);
+
+  // The drafts live here, not inside the pickers: saving has to include what is typed
+  // but not yet added, or a half-finished entry vanishes without a word.
+  const [cityDraft, setCityDraft] = useState('');
+  const [regionDraft, setRegionDraft] = useState('');
 
   const save = useMutation({
     mutationFn: (search: SearchPreferences) =>
       apiRequest<SessionView>('/me/settings', { method: 'PATCH', json: { search } }),
-    onSuccess: (updated) => {
+    onSuccess: (updated, variables) => {
       client.applySession(updated);
+      setCities([...variables.cities]);
+      setRegions([...variables.regions]);
+      setCityDraft('');
+      setRegionDraft('');
       useAppStore.getState().notify('success', 'Фильтры поиска сохранены.');
     },
   });
@@ -457,26 +597,14 @@ function FiltersSection({ session }: { session: SessionInfo }) {
     genders,
     ageMin: parseBound(ageMin),
     ageMax: parseBound(ageMax),
-    locations,
+    cities: addPendingPlace(cities, cityDraft),
+    regions: addPendingPlace(regions, regionDraft),
     languages,
     relaxAllowed,
   });
 
   const preview = draft.success ? describeCriteria(draft.data) : [];
-
-  /**
-   * Place filters that cannot match anybody yet, because the matching half of the
-   * comparison ("my city") has not been declared.
-   *
-   * Worth saying out loud rather than blocking: ordering the filters before filling in
-   * the profile is a legitimate thing to do, and the filter starts working the moment the
-   * place is declared. Left unsaid it is indistinguishable from a broken search, which is
-   * the same failure the inverted age range is refused for.
-   */
-  const undeclaredPlaces = [
-    locations.includes('city') && !session.profile.city ? 'город' : null,
-    locations.includes('region') && !session.profile.region ? 'регион' : null,
-  ].filter((value): value is string => value !== null);
+  const anywhere = cities.length === 0 && regions.length === 0;
 
   function toggle<T>(list: readonly T[], value: T): T[] {
     return list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
@@ -529,27 +657,68 @@ function FiltersSection({ session }: { session: SessionInfo }) {
         </div>
       </fieldset>
 
-      <MultiChoice
-        legend="Где искать"
-        // Several places is meaningful, and not the same as the widest one alone: a
-        // candidate who declared a city but no region matches «Только мой город» and
-        // not «Только мой регион» (docs/DECISIONS.md D25).
-        options={[ANY, ...LOCATION_MODES]}
-        selected={locations.length === 0 ? [ANY] : locations}
-        onToggle={(value) => {
-          if (value === ANY) setLocations([]);
-          else setLocations((current) => toggle(current, value));
-        }}
-        labelFor={(value) => (value === ANY ? 'Любой' : LOCATION_LABELS[value])}
-        disabled={save.isPending}
-      />
+      <fieldset className="flex flex-col gap-2" disabled={save.isPending}>
+        <legend className="text-sm font-medium">Где искать</legend>
 
-      {undeclaredPlaces.length > 0 ? (
-        <p className="text-xs text-muted-foreground">
-          В разделе «О вас» не указан {undeclaredPlaces.join(' и ')} — пока этот фильтр не найдёт
-          никого.
-        </p>
-      ) : null}
+        {/*
+          The neutral chip, the same one every other row has: «Любой» is the empty pair of
+          lists, never a value on the wire (docs/DECISIONS.md D25/D27).
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={anywhere}
+            onClick={() => {
+              setCities([]);
+              setRegions([]);
+              setCityDraft('');
+              setRegionDraft('');
+            }}
+            className={chipClass(anywhere)}
+          >
+            Любой
+          </button>
+          <span className="text-xs text-muted-foreground">
+            {anywhere ? 'Подойдёт любой город и регион.' : 'Подойдёт любой из перечисленных.'}
+          </span>
+        </div>
+
+        <PlacePicker
+          id="filter-cities"
+          legend="Города"
+          values={cities}
+          draft={cityDraft}
+          options={CITY_SUGGESTIONS}
+          addLabel="Добавить город"
+          placeholder="Начните вводить название"
+          emptyHint="Не выбран ни один город."
+          onDraftChange={setCityDraft}
+          onAdd={() => {
+            setCities((current) => addPendingPlace(current, cityDraft));
+            setCityDraft('');
+          }}
+          onRemove={(value) => setCities((current) => current.filter((item) => item !== value))}
+          disabled={save.isPending}
+        />
+
+        <PlacePicker
+          id="filter-regions"
+          legend="Регионы"
+          values={regions}
+          draft={regionDraft}
+          options={REGION_SUGGESTIONS}
+          addLabel="Добавить регион"
+          placeholder="Начните вводить название"
+          emptyHint="Не выбран ни один регион."
+          onDraftChange={setRegionDraft}
+          onAdd={() => {
+            setRegions((current) => addPendingPlace(current, regionDraft));
+            setRegionDraft('');
+          }}
+          onRemove={(value) => setRegions((current) => current.filter((item) => item !== value))}
+          disabled={save.isPending}
+        />
+      </fieldset>
 
       <LanguagePicker
         legend="Общий язык"

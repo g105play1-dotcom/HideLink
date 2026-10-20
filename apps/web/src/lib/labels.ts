@@ -3,7 +3,6 @@ import {
   type DeclaredProfile,
   type Gender,
   type Language,
-  type LocationMode,
   type OwnerMessageTopic,
   type RelaxableCriterion,
   type SearchPreferences,
@@ -37,15 +36,20 @@ export const LANGUAGE_LABELS: Record<Language, string> = {
 };
 
 /**
- * The place modes, as the user reads them.
+ * The place filters, as the user reads them.
  *
- * There is no label for "anywhere": that is the empty selection, and the settings render
- * it as an explicit «Любой» chip next to these (docs/DECISIONS.md D22/D25).
+ * A list of names rather than a mode: «Где искать» names the cities and regions a
+ * candidate has declared, and "anywhere" is the empty list, rendered as an explicit
+ * «Любой» chip next to the pickers (docs/DECISIONS.md D27).
  */
-export const LOCATION_LABELS: Record<LocationMode, string> = {
-  city: 'Только мой город',
-  region: 'Только мой регион',
-};
+export function describePlaces(cities: readonly string[], regions: readonly string[]): string[] {
+  const lines: string[] = [];
+
+  if (cities.length > 0) lines.push(`Города: ${cities.join(', ')}`);
+  if (regions.length > 0) lines.push(`Регионы: ${regions.join(', ')}`);
+
+  return lines;
+}
 
 /** How a dropped filter is named in the "searching wider" notice. */
 export const CRITERION_LABELS: Record<RelaxableCriterion, string> = {
@@ -109,9 +113,7 @@ export function describeCriteria(criteria: SearchPreferences): string[] {
     lines.push(`Возраст: до ${criteria.ageMax}`);
   }
 
-  for (const mode of criteria.locations) {
-    lines.push(LOCATION_LABELS[mode]);
-  }
+  lines.push(...describePlaces(criteria.cities, criteria.regions));
 
   if (criteria.languages.length > 0) {
     lines.push(
