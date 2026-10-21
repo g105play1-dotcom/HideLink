@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-import { expectNoClientErrors, matchPair, newIdentity } from '../support/app';
+import { expectNoClientErrors, matchPair, newIdentity, waitForChat } from '../support/app';
 
 /**
  * Friends are the one persistent link a random chat can produce.
@@ -37,6 +37,21 @@ test.describe('friends', () => {
 
     await expect(aliceFriends.getByTitle(bob.publicId)).toBeVisible();
     await expect(bobFriends.getByTitle(alice.publicId)).toBeVisible();
+
+    // Starting a new chat from the list must keep the friendship visible: offering
+    // "add friend" to someone who is already a friend only leads to an error.
+    await aliceFriends.getByRole('button', { name: 'Написать', exact: true }).click();
+    const directRequest = bob.page.getByRole('dialog');
+    await expect(directRequest).toBeVisible();
+    await directRequest.getByRole('button', { name: 'Принять', exact: true }).click();
+    expect(await waitForChat(bob.page)).toBe(await waitForChat(alice.page));
+
+    await expect(alice.page.getByRole('button', { name: 'Вы друзья', exact: true })).toBeVisible();
+    await expect(bob.page.getByRole('button', { name: 'Вы друзья', exact: true })).toBeVisible();
+
+    await bob.page.getByRole('button', { name: 'Завершить', exact: true }).click();
+    await alice.page.getByRole('button', { name: 'Готово', exact: true }).click();
+    await bob.page.getByRole('button', { name: 'Готово', exact: true }).click();
 
     // Removing is immediate and one-sided. The other tab must not keep a contact that
     // the server has already deleted.

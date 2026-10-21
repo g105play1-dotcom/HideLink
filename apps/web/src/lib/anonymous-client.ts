@@ -495,15 +495,19 @@ class AnonymousClient {
     });
 
     socket.on('chat:started', (payload) => {
-      useAppStore
-        .getState()
-        .startChat(toChatInfo(payload.chat, payload.initiator), toUiMessages(payload.messages));
+      const store = useAppStore.getState();
+      store.startChat(toChatInfo(payload.chat, payload.initiator), toUiMessages(payload.messages));
+      // A direct chat with an existing friend must not offer "add friend" again.
+      if (payload.chat.friendsWithPeer) store.setFriendsInChat(true);
     });
 
     socket.on('chat:resumed', (payload) => {
-      useAppStore
-        .getState()
-        .restoreChat(toChatInfo(payload.chat, payload.initiator), toUiMessages(payload.messages));
+      const store = useAppStore.getState();
+      store.restoreChat(
+        toChatInfo(payload.chat, payload.initiator),
+        toUiMessages(payload.messages),
+      );
+      if (payload.chat.friendsWithPeer) store.setFriendsInChat(true);
     });
 
     socket.on('chat:message', (payload) => {
@@ -539,6 +543,7 @@ class AnonymousClient {
         // The sender of an accepted request learns the chat from here; the recipient
         // learns it from `chat:started`. Either way the state is the same.
         store.startChat(toChatInfo(payload.chat, true), []);
+        if (payload.chat.friendsWithPeer) store.setFriendsInChat(true);
         return;
       }
 

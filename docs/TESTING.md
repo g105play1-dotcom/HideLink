@@ -27,9 +27,9 @@ the E2E package used to answer to `test`).
 | --- | --- | --- | --- |
 | `packages/shared` | 6 | **95** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 16 | **186** | 34 unit + 152 integration |
+| `apps/api` | 16 | **187** | 34 unit + 153 integration |
 | `tests/e2e` | 13 | **33** | browser, two independent contexts |
-| **Total** | **36** | **322** | |
+| **Total** | **36** | **323** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
 `test/unit/platform.test.ts` 3, `test/friend-requests.test.ts` 5) run without a server; the twelve
@@ -94,7 +94,7 @@ Each file below runs against the live process; the descriptions are the guarante
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
 | `protocol.test.ts` | 10 | The eleven client events are declared and each is routed to a handler |
 | `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
-| `friends.test.ts` | 12 | A friendship appears only after acceptance and then shows each side the other User ID; the second person pressing "add friend" accepts instead of creating a second request; a decline closes the chat and refuses further requests; the requester cannot answer their own request and a failed answer does not consume it; a foreign/unknown chat is refused; ending the chat cancels the pending question for both; `session:ready` restores an incoming/outgoing request and an existing friendship after a reload; removal is one-sided, notifies the other side and is idempotent; a list is per caller; block, report and identity rotation sever the link (rotation silently) |
+| `friends.test.ts` | 13 | A friendship appears only after acceptance and then shows each side the other User ID; the second person pressing "add friend" accepts instead of creating a second request; a decline closes the chat and refuses further requests; the requester cannot answer their own request and a failed answer does not consume it; a foreign/unknown chat is refused; ending the chat cancels the pending question for both; `session:ready` restores an incoming/outgoing request and an existing friendship after a reload; a new direct chat with a friend announces that friendship in `chat:started` for both clients; removal is one-sided, notifies the other side and is idempotent; a list is per caller; block, report and identity rotation sever the link (rotation silently) |
 
 Two deliberate test-environment switches make these deterministic and are the reason some behaviours
 are *not* covered here (`apps/api/test/support/test-env.ts`): `MATCH_RELAX_AFTER_MS=0` and
@@ -120,7 +120,7 @@ exactly one, non-secret, machine-independent way.
 | `matching.spec.ts` | 4 | Random match and bidirectional messages; ending a chat with distinct reasons for both sides; "next" starting a clean conversation; cancelling a search with a running timer |
 | `filters.spec.ts` | 6 | A filter keeping two waiters apart, then a visible widening that lets the previously excluded peer through; a filter that excludes; every row's «Любой» chip clearing it, with several typed cities, a region and a country code round-tripping through the server; an impossible age range refused in the UI; a declared country stored as a code and withdrawn through the profile select; a declared gender withdrawn by pressing it again, survived across a reload |
 | `direct.spec.ts` | 4 | Request sent/accepted; request declined; incoming requests disabled (and the setting surviving a reload); self-request refused |
-| `friends.spec.ts` | 1 | Two people match, one asks to be friends, the other accepts, both see «Вы друзья», the list on the idle screen shows the other User ID, and one-sided removal clears the contact on both screens |
+| `friends.spec.ts` | 1 | Two people match, one asks to be friends, the other accepts, both see «Вы друзья», the list on the idle screen shows the other User ID, a new direct chat from that list still shows «Вы друзья», and one-sided removal clears the contact on both screens |
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |

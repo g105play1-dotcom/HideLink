@@ -45,6 +45,13 @@ export interface CreateChatParams {
    * so switching the archive off stops it immediately.
    */
   archived?: boolean;
+  /**
+   * Whether the two participants were already friends when this direct chat started.
+   *
+   * False for every random chat. The client needs this on `chat:started`; otherwise a
+   * friend would see "add friend" again until the next `session:ready`.
+   */
+  friendsWithPeer?: boolean;
 }
 
 /**
@@ -65,6 +72,8 @@ export class ChatRecord {
   readonly startedAt: Date;
   /** Set when the owner's archive policy selected this conversation. */
   readonly archived: boolean;
+  /** Whether the participants were already friends when this direct chat started. */
+  readonly friendsWithPeer: boolean;
 
   status: 'active' | 'ended' = 'active';
   endedAt: Date | null = null;
@@ -88,6 +97,7 @@ export class ChatRecord {
     this.initiatorId = params.initiatorId;
     this.startedAt = params.startedAt;
     this.archived = params.archived ?? false;
+    this.friendsWithPeer = params.friendsWithPeer ?? false;
 
     // Each participant gets an independent random alias for the other, so the
     // same person is unlinkable across two different chats.

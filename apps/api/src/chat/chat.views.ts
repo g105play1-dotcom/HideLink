@@ -26,6 +26,7 @@ export function buildChatView(chat: ChatRecord, viewerId: string): ChatView {
     kind: chat.kind,
     peer: buildPeerView(chat, chat.peerOf(viewerId)),
     startedAt: chat.startedAt.toISOString(),
+    ...(chat.friendsWithPeer ? { friendsWithPeer: true } : {}),
   };
 }
 

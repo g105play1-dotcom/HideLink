@@ -49,6 +49,15 @@ interface FriendRequestAck {
   accepted: boolean;
 }
 
+interface IncomingChatRequest {
+  requestId: string;
+}
+
+interface ChatEnded {
+  chatId: string;
+  reason: string;
+}
+
 const open: RealtimeClient[] = [];
 const chats: { client: RealtimeClient; chatId: string }[] = [];
 
@@ -164,6 +173,42 @@ describe('asking to become friends', () => {
     const again = await sendFriendRequest(a, chatId);
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error.code).toBe(ErrorCode.ALREADY_FRIENDS);
+  });
+
+  it('tells both clients that a new direct chat is with an existing friend', async () => {
+    const { a, b, chatId } = await twoInChat();
+    await becomeFriends(a, b, chatId);
+
+    const bEnded = b.waitFor<ChatEnded>('chat:ended', { fromIndex: b.received.length });
+    const left = await a.emit('chat:leave', { chatId });
+    expect(left.ok).toBe(true);
+    await bEnded;
+
+    const incoming = b.waitFor<IncomingChatRequest>('request:incoming', {
+      fromIndex: b.received.length,
+    });
+    const startedA = a.waitFor<StartedChat>('chat:started', { fromIndex: a.received.length });
+    const startedB = b.waitFor<StartedChat>('chat:started', { fromIndex: b.received.length });
+
+    const sent = await a.emit<{ requestId: string }>('request:send', {
+      publicId: b.identity.publicId,
+    });
+    expect(sent.ok).toBe(true);
+    const request = await incoming;
+
+    const accepted = await b.emit<{ accepted: boolean }>('request:respond', {
+      requestId: request.requestId,
+      accept: true,
+    });
+    expect(accepted.ok && accepted.data.accepted).toBe(true);
+
+    const [forA, forB] = await Promise.all([startedA, startedB]);
+    expect(forA.chat.chatId).toBe(forB.chat.chatId);
+    expect(forA.chat.kind).toBe('direct');
+    expect(forA.chat.friendsWithPeer).toBe(true);
+    expect(forB.chat.friendsWithPeer).toBe(true);
+
+    chats.push({ client: a, chatId: forA.chat.chatId }, { client: b, chatId: forB.chat.chatId });
   });
 
   it('treats the second person pressing "add friend" as consent, not as a second request', async () => {

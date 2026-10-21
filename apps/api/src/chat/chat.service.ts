@@ -404,6 +404,13 @@ export class ChatService implements OnApplicationShutdown {
     await this.directory.ensureLoaded(request.fromUserId);
     const requester = this.directory.get(request.fromUserId);
 
+    // A direct chat can start between two people who are already friends. The client
+    // learns this from `chat:started`, not only after a reconnect. This lookup is
+    // asynchronous, so it must happen *before* the availability check below: otherwise
+    // one of the participants could join another chat while this handler waits for the
+    // database, and `registry.create` would then find them busy.
+    const friendsWithPeer = await this.friends.areFriends(userId, request.fromUserId);
+
     const blocked = this.directory.isBlockedBetween(userId, request.fromUserId);
     const unavailable =
       !requester ||
@@ -430,6 +437,7 @@ export class ChatService implements OnApplicationShutdown {
       participantBId: request.fromUserId,
       initiatorId: request.fromUserId,
       publicIdByUser,
+      friendsWithPeer,
     });
 
     this.bus.emit({ type: 'request.resolved', userId, requestId, status: 'accepted', chat });
@@ -1046,6 +1054,7 @@ export class ChatService implements OnApplicationShutdown {
     participantBId: string;
     initiatorId: string;
     publicIdByUser?: ReadonlyMap<string, string>;
+    friendsWithPeer?: boolean;
   }): Promise<ChatRecord> {
     const chatId = newChatId();
     const startedAt = new Date();
@@ -1070,6 +1079,7 @@ export class ChatService implements OnApplicationShutdown {
       startedAt,
       archived,
       ...(params.publicIdByUser ? { publicIdByUser: params.publicIdByUser } : {}),
+      ...(params.friendsWithPeer ? { friendsWithPeer: true } : {}),
     });
 
     try {

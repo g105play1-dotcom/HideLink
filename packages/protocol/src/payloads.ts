@@ -60,6 +60,16 @@ export interface ChatView {
   kind: ChatKind;
   peer: PeerView;
   startedAt: string;
+  /**
+   * Present and `true` only when this is a direct chat between people who are already
+   * friends. A new direct chat has to say so: `chat:started` is the only event the two
+   * clients receive, and without this flag the button would offer "add friend" to a
+   * friend until the next reload.
+   *
+   * Omitted for random chats, where a friendship cannot exist by construction, and for
+   * direct chats whose participants are not friends.
+   */
+  friendsWithPeer?: boolean;
 }
 
 export interface ChatMessageView {

@@ -179,6 +179,26 @@ socket.on('request:incoming', (request) => {
   });
 });
 
+// A friend request is the one question this bot can answer on the human's behalf:
+// the script exists to let one person try a two-person feature, and without this
+// the "В друзья" button would always expire in a manual test.
+socket.on('friend:incoming', (request) => {
+  say(`friend request from "${request.alias}" in chat ${request.chatId}, accepting`);
+  socket.emit('friend:respond', { requestId: request.requestId, accept: true }, (ack) => {
+    if (!ack.ok) say(`could not answer the friend request: ${ack.error.code}`);
+  });
+});
+
+socket.on('friend:resolved', (payload) => {
+  if (payload.status === 'accepted' && payload.friend) {
+    say(`now friends with ${payload.friend.publicId} (since ${payload.friend.since})`);
+  } else {
+    say(`friend request ${payload.status}`);
+  }
+});
+
+socket.on('friend:removed', (payload) => say(`removed from friends: ${payload.publicId}`));
+
 socket.on('request:resolved', (payload) => say(`request resolved: ${payload.status}`));
 socket.on('peer:blocked', (payload) => say(`the peer blocked you (${payload.publicId})`));
 socket.on('app:error', (payload) => say(`server error: ${payload.code} — ${payload.message}`));
