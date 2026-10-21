@@ -57,7 +57,10 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const locale = await currentLocale();
 
   return (
-    <html lang={locale}>
+    // The inline theme script below sets `class`/`style` on <html> before React hydrates,
+    // which is intentional (no white flash). Suppress the resulting attribute warning
+    // instead of letting the dev overlay report a mismatch on every load.
+    <html lang={locale} suppressHydrationWarning>
       <body className="antialiased">
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         {/* Real, working skip link — the first focusable element on the page. */}
