@@ -700,8 +700,8 @@ his own platform offered.
    refuses a *new* block with `ErrorCode.BLOCKING_DISABLED` (409), both for `block:peer` and for
    `POST /blocks`. The check is absent from the unblock path and from `GET /blocks`: switching the
    action off is not an amnesty, and it must never trap anyone with a block they cannot lift. The
-   settings screen keeps showing the blocked list (with a line explaining that administration
-   switched blocking off) precisely so it stays undoable.
+   idle screen keeps showing the blocked list, beside the friends list, precisely so it stays
+   undoable; it carries no separate notice about the platform policy.
 4. **The wire follows the owner, not the user.** `SessionView` and `SessionReadyPayload` carry
    `blockingEnabled` at the top level, next to `settings`, because it is not a setting.
    `settingsUpdateSchema` no longer accepts it; a `PATCH /me/settings` that still tries is rejected

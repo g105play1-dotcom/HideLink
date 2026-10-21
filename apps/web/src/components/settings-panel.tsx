@@ -11,7 +11,6 @@ import {
   PROFILE_LIMITS,
   profileUpdateSchema,
   searchPreferencesSchema,
-  type BlockListResponse,
   type CountryCode,
   type Gender,
   type IncomingRequestPolicy,
@@ -20,9 +19,8 @@ import {
   type SearchPreferences,
   type SessionView,
 } from '@anonlink/shared';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import {
-  Ban,
   CircleAlert,
   LoaderCircle,
   Save,
@@ -987,7 +985,6 @@ const POLICY_OPTIONS: Array<{ value: IncomingRequestPolicy; label: MessageKey; h
 
 function ModerationSection({ session }: { session: SessionInfo }) {
   const { locale, t } = useI18n();
-  const queryClient = useQueryClient();
 
   const updateSetting = useMutation({
     mutationFn: (patch: { incomingRequests?: IncomingRequestPolicy }) =>
@@ -997,23 +994,6 @@ function ModerationSection({ session }: { session: SessionInfo }) {
       // toggle showing the *old* value until the page was reloaded: the setting was saved,
       // but the screen said otherwise.
       client.applySession(updated);
-    },
-  });
-
-  const blocks = useQuery({
-    queryKey: ['blocks'],
-    queryFn: () => apiRequest<BlockListResponse>('/blocks'),
-    staleTime: 10_000,
-    // Always asked, even while the platform switch is off: existing blocks stay in force
-    // and must remain removable. Hiding the list would trap a user with a block they
-    // cannot lift, which is exactly what switching a feature off must not do.
-  });
-
-  const unblock = useMutation({
-    mutationFn: (publicId: string) =>
-      apiRequest<{ removed: boolean }>(`/blocks/${publicId}`, { method: 'DELETE' }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['blocks'] });
     },
   });
 
@@ -1053,71 +1033,6 @@ function ModerationSection({ session }: { session: SessionInfo }) {
             );
           })}
         </div>
-      </div>
-
-      {/*
-        The switch lives in `/admin` now (D31). What a user needs to know here is only
-        the consequence: the button is gone from chat, but nothing they blocked earlier
-        was quietly lifted.
-      */}
-      {!session.blockingEnabled ? (
-        <p className="border-t border-border pt-3 text-xs text-muted-foreground">
-          {t(
-            'Блокировка собеседника сейчас отключена администрацией. Ранее заблокированные остаются заблокированными, и снять блокировку можно ниже.',
-          )}
-        </p>
-      ) : null}
-
-      <div className="flex flex-col gap-3 border-t border-border pt-3">
-        <span className="text-sm font-medium">{t('Заблокированные')}</span>
-
-        {blocks.isPending ? (
-          <div className="flex flex-col gap-2" aria-busy="true" aria-label={t('Загрузка списка')}>
-            <Skeleton className="h-11 w-full" />
-            <Skeleton className="h-11 w-full" />
-          </div>
-        ) : null}
-
-        {blocks.isError ? (
-          <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
-            <CircleAlert className="size-4 shrink-0" aria-hidden="true" />
-            {describeError(blocks.error, locale)}
-          </p>
-        ) : null}
-
-        {blocks.isSuccess && blocks.data.blocks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t('Список пуст.')}</p>
-        ) : null}
-
-        {blocks.data?.blocks.map((block) => (
-          <div
-            key={block.publicId}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-2.5"
-          >
-            <code translate="no" className="font-mono text-sm">
-              {block.publicId}
-            </code>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={unblock.isPending}
-              onClick={() => unblock.mutate(block.publicId)}
-            >
-              {unblock.isPending && unblock.variables === block.publicId ? (
-                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Ban className="size-4" aria-hidden="true" />
-              )}
-              {t('Разблокировать')}
-            </Button>
-          </div>
-        ))}
-
-        {unblock.isError ? (
-          <p className="text-sm text-destructive" role="alert">
-            {describeError(unblock.error, locale)}
-          </p>
-        ) : null}
       </div>
 
       {updateSetting.isError ? (

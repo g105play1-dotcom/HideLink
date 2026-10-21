@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import { Ban, LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 
@@ -12,22 +13,30 @@ import { client } from '@/lib/anonymous-client';
  * Confirm blocking the current peer.
  *
  * Blocking is the one action here that outlives the conversation: it is stored against
- * the identity, it ends the chat immediately, and for a *random* match there is no way
- * back — the peer's User ID was never shown, so the block could not be undone later even
- * if the user wanted to. That is worth one confirmation.
+ * the identity, it ends the chat immediately, and lifting it later means finding the
+ * person in the block list at the bottom of the main page. That is worth one confirmation.
  *
  * Leaving an abusive chat stays a single click ("Завершить"): the safety-critical action
  * must not be slowed down, but the durable one can be.
  */
 export function BlockDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
 
   async function confirm() {
     setBusy(true);
     try {
       const outcome = await client.blockCurrentPeer();
-      if (outcome.ok) onClose();
+      if (outcome.ok) {
+        onClose();
+        // The idle screen keeps the block list mounted, and its query counts as fresh
+        // for ten seconds. Without this the person would return from the chat and see a
+        // list that does not contain the block they just made. A block also severs a
+        // friendship server-side, so the friend list has to be refreshed with it.
+        void queryClient.invalidateQueries({ queryKey: ['blocks'] });
+        void queryClient.invalidateQueries({ queryKey: ['friends'] });
+      }
     } finally {
       setBusy(false);
     }
@@ -45,7 +54,7 @@ export function BlockDialog({ open, onClose }: { open: boolean; onClose: () => v
       <div className="flex flex-col gap-4">
         <p className="text-xs text-muted-foreground">
           {t(
-            'Случайные собеседники не видят ваш User ID, но блокировка всё равно их запоминает — на случай, если вы встретитесь снова. Список блокировок можно посмотреть в разделе «Настройки».',
+            'Случайные собеседники не видят ваш User ID, но блокировка всё равно их запоминает — на случай, если вы встретитесь снова. Список блокировок можно посмотреть внизу главной страницы.',
           )}
         </p>
 

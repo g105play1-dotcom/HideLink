@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto';
 
 import { expect, test } from '@playwright/test';
 
-import { expectMessage, matchPair, newIdentity, sendMessage, waitForChat } from '../support/app';
+import {
+  closeSettings,
+  connectionStatus,
+  expectMessage,
+  matchPair,
+  newIdentity,
+  openSettings,
+  searchButton,
+  sendMessage,
+  waitForChat,
+} from '../support/app';
 import { openOwnerPage, setBlockingPolicy, signIn } from '../support/owner';
 
 /**
@@ -128,6 +138,72 @@ test.describe('moderation panel', () => {
       );
     } finally {
       await owner.context.close();
+    }
+  });
+
+  test('blocked people sit beside friends at the bottom and stay removable when the policy is off', async ({
+    browser,
+  }) => {
+    await setBlockingPolicy(true);
+
+    const blocker = await newIdentity(browser);
+    const peer = await newIdentity(browser);
+
+    try {
+      await matchPair(blocker, peer);
+      await waitForChat(blocker.page);
+
+      await blocker.page.getByRole('button', { name: 'Блокировать', exact: true }).click();
+      const dialog = blocker.page.getByRole('dialog', { name: 'Заблокировать собеседника?' });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole('button', { name: 'Заблокировать', exact: true }).click();
+      await expect(dialog).toBeHidden();
+
+      await blocker.page.getByRole('button', { name: 'Готово', exact: true }).click();
+
+      const friendsHeading = blocker.page.getByRole('heading', { name: /^Друзья/ });
+      const blockedHeading = blocker.page.getByRole('heading', { name: /^Заблокированные/ });
+      await expect(friendsHeading).toBeVisible();
+      await expect(blockedHeading).toBeVisible();
+
+      const friendsBox = await friendsHeading.boundingBox();
+      const blockedBox = await blockedHeading.boundingBox();
+      const searchBox = await searchButton(blocker.page).boundingBox();
+
+      expect(friendsBox).not.toBeNull();
+      expect(blockedBox).not.toBeNull();
+      expect(searchBox).not.toBeNull();
+
+      // Friends on the left, blocked people on the right, both under the search card.
+      expect(friendsBox!.x).toBeLessThan(blockedBox!.x);
+      expect(Math.abs(friendsBox!.y - blockedBox!.y)).toBeLessThan(8);
+      expect(blockedBox!.y).toBeGreaterThan(searchBox!.y);
+
+      const blockedList = blocker.page.getByRole('list', { name: 'Список заблокированных' });
+      await expect(blockedList.getByTitle(peer.publicId)).toBeVisible();
+
+      // Switching new blocks off is not an amnesty: the existing block is still listed
+      // and removable, and the settings screen neither repeats the list nor explains the
+      // platform policy. The absence of the action in a chat is the whole message.
+      await setBlockingPolicy(false);
+      await blocker.page.reload();
+      await expect(connectionStatus(blocker.page)).toHaveText('На связи', { timeout: 30_000 });
+      await expect(blockedList.getByTitle(peer.publicId)).toBeVisible();
+
+      await openSettings(blocker.page);
+      const settings = blocker.page.locator('#settings-panel');
+      await expect(settings.getByText('Заблокированные', { exact: true })).toHaveCount(0);
+      await expect(
+        settings.getByText('Блокировка собеседника сейчас отключена администрацией.', {
+          exact: false,
+        }),
+      ).toHaveCount(0);
+      await closeSettings(blocker.page);
+
+      await blockedList.getByRole('button', { name: 'Разблокировать', exact: true }).click();
+      await expect(blockedList).toHaveCount(0);
+    } finally {
+      await setBlockingPolicy(true);
     }
   });
 });

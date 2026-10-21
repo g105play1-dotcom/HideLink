@@ -28,15 +28,15 @@ the E2E package used to answer to `test`).
 | `packages/shared` | 6 | **95** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
 | `apps/api` | 16 | **187** | 34 unit + 153 integration |
-| `tests/e2e` | 13 | **33** | browser, two independent contexts |
-| **Total** | **36** | **323** | |
+| `tests/e2e` | 13 | **34** | browser, two independent contexts |
+| **Total** | **36** | **324** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
 `test/unit/platform.test.ts` 3, `test/friend-requests.test.ts` 5) run without a server; the twelve
 integration files start a **real API process on port 3101** against the `*_test` database.
 
 **Last full run (2026-10-21, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `33 passed`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `34 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
@@ -126,7 +126,7 @@ exactly one, non-secret, machine-independent way.
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
 | `admin.spec.ts` | 3 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept |
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
-| `moderation.spec.ts` | 2 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload |
+| `moderation.spec.ts` | 3 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload; a user blocks the peer through the chat dialog and the person appears in the bottom-right block list beside the friends list, stays there and remains removable after the owner switches new blocks off, without a policy notice in the settings |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
 | `language.spec.ts` | 2 | The interface is Russian even in an `en-US` browser; the switch offers all three native names, changes `<html lang>`, the visible copy and (after a reload) the title, persists in both the cookie and `localStorage`, and returns to Russian; `/admin` stays Russian and declares `lang="ru"` while the public interface is English |
 
@@ -148,6 +148,14 @@ twice (the acknowledgement and the event, in either order); the store now treats
 as idempotent (`apps/web/src/store/app-store.ts`). The assertion stays: "the screen reports what the
 server is actually applying" is a product requirement, not a detail.
 
+`moderation.spec.ts` found a second one when the block list moved to the idle screen. Both contact lists
+are now mounted before a chat starts, and the block list's query was considered fresh for ten seconds:
+after blocking someone and pressing «Готово», the list still rendered the pre-chat answer, so the person
+they had just blocked was missing until a manual refresh or a reload. The filter test would never see
+this, because it never blocks. `BlockDialog` now invalidates the `blocks` and `friends` queries after a
+successful block, because the server also deletes the friendship in the same transaction; `ReportDialog`
+invalidates the friend query for the same reason, since a report severs the friendship too.
+
 ### 5.1 The brief's twenty scenarios, mapped honestly
 
 | # | Required scenario | Where it is checked |
@@ -166,7 +174,7 @@ server is actually applying" is a product requirement, not a detail.
 | 12 | Lookup by ID | `direct.spec.ts`, `errors.spec.ts` |
 | 13 | Unavailable user | `direct.spec.ts` (requests off), `errors.spec.ts` (unknown) |
 | 14 | Availability setting | `direct.spec.ts` (setting survives reload) |
-| 15 | Block + report | **Integration only**: `moderation.test.ts`, `rest.test.ts`. There is no browser journey for the positive block/report flow — see §6. |
+| 15 | Block + report | `moderation.spec.ts` (blocking through the chat dialog, the entry in the bottom block list, the list surviving the owner's switch, and the report reading in `/admin`) + `moderation.test.ts`, `rest.test.ts` |
 | 16 | Disconnect / reconnect | `resilience.spec.ts` (reload; API restart) + `chat.test.ts` (grace) |
 | 17 | No double assignment | `matching.test.ts` (server-level) |
 | 18 | Third party cannot join | `access.spec.ts` |
@@ -186,11 +194,12 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
    most valuable missing test. The archive is the one exception: `archive.test.ts` backdates an archive
    and calls `POST /admin/archives/delete-expired`, which runs the same `deleteExpired()` the sweep
    runs — so the *query* is proved, though not the timer. COMPLIANCE §5.7 is marked accordingly.
-2. **Block/report in a browser.** The report journey is now covered end to end
-   (`moderation.spec.ts`: a user reports, the owner reads the snapshot and changes the status), but
-   nothing clicks «Заблокировать» through the interface and then verifies the peer's screen, and no
-   browser test asserts what the *reporter's peer* sees at the moment the chat ends. Blocking is
-   exercised in the browser only as a refusal of a third party (`access.spec.ts`).
+2. **Block/report in a browser.** The report journey is covered end to end
+   (`moderation.spec.ts`: a user reports, the owner reads the snapshot and changes the status), and the
+   blocker's side of a block is now covered too (the dialog, the entry in the bottom block list, the list
+   surviving the policy switch, and unblocking). Nothing verifies the *peer's* screen at the moment the
+   chat ends when it is blocked; blocking a third party is covered only as a refusal
+   (`access.spec.ts`).
 3. **Only Chromium.** No Firefox, no WebKit, no mobile viewport.
 4. **No accessibility audit.** ARIA roles are used and relied upon as locators, but there is no axe
    run, no keyboard-only pass, no screen-reader check.

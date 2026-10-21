@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { AdSlot } from '@/components/ad-slot';
 import { BlockDialog } from '@/components/block-dialog';
+import { BlockedPanel } from '@/components/blocked-panel';
 import { ChatPanel } from '@/components/chat-panel';
 import { ConnectionBadge } from '@/components/connection-badge';
 import { ContactOwnerDialog } from '@/components/contact-owner-dialog';
@@ -126,7 +127,6 @@ export function HomeScreen() {
                 be a control that cannot be used.
               */}
               {phase === 'idle' ? <DirectSearch /> : null}
-              {phase === 'idle' ? <FriendsPanel /> : null}
 
               {inChat && chat ? (
                 <ChatPanel
@@ -142,6 +142,19 @@ export function HomeScreen() {
               ) : (
                 <SearchPanel session={session} />
               )}
+
+              {/*
+                Two durable contact lists belong at the bottom, under the search card:
+                friends on the left, blocked people on the right. They are not part of
+                the search itself, and keeping them side by side means the eye finds the
+                same place for both after a chat.
+              */}
+              {phase === 'idle' ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FriendsPanel />
+                  <BlockedPanel />
+                </div>
+              ) : null}
             </>
           )}
         </main>

@@ -1,6 +1,7 @@
 'use client';
 
 import { REPORT_REASONS, type ReportReason } from '@anonlink/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { Flag, LoaderCircle } from 'lucide-react';
 import { useState } from 'react';
 
@@ -22,6 +23,7 @@ import { cn } from '@/lib/utils';
  */
 export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
   const [reason, setReason] = useState<ReportReason>('abuse');
   const [details, setDetails] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,6 +35,10 @@ export function ReportDialog({ open, onClose }: { open: boolean; onClose: () => 
       if (outcome.ok) {
         setDetails('');
         onClose();
+        // A report deletes the friendship in the same transaction. The idle screen caches
+        // the list for ten seconds, so without this it would keep showing the person just
+        // reported and offer a "write" action the server would refuse.
+        void queryClient.invalidateQueries({ queryKey: ['friends'] });
       }
     } finally {
       setBusy(false);

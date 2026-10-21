@@ -39,9 +39,10 @@ export interface ChatPanelProps {
   /**
    * Whether the user has the block feature switched on.
    *
-   * With it off, the action is not offered at all — the same setting also hides the
-   * blocked list in the settings (docs/DECISIONS.md D24). The server refuses the call
-   * either way, so this is the interface agreeing with the rule, not enforcing it.
+   * With it off, the action is not offered at all — the block list at the bottom of the
+   * main page stays visible, because an old block must remain removable (docs/DECISIONS.md
+   * D31). The server refuses the call either way, so this is the interface agreeing with the
+   * rule, not enforcing it.
    */
   canBlock: boolean;
   /** Opens the report dialog, which is owned by the screen above. */
