@@ -25,6 +25,9 @@ export const ErrorCode = {
   REQUEST_EXPIRED: 'REQUEST_EXPIRED',
   REQUEST_DECLINED: 'REQUEST_DECLINED',
   INCOMING_REQUESTS_DISABLED: 'INCOMING_REQUESTS_DISABLED',
+  ALREADY_FRIENDS: 'ALREADY_FRIENDS',
+  FRIEND_REQUEST_NOT_FOUND: 'FRIEND_REQUEST_NOT_FOUND',
+  FRIEND_REQUEST_EXPIRED: 'FRIEND_REQUEST_EXPIRED',
   BLOCKED: 'BLOCKED',
   /**
    * The administration has switched the "block" action off for the whole platform.
@@ -67,6 +70,9 @@ const MESSAGES: Record<ErrorCode, string> = {
   REQUEST_EXPIRED: 'This connection request has expired.',
   REQUEST_DECLINED: 'The connection request was declined.',
   INCOMING_REQUESTS_DISABLED: 'This user does not accept direct requests.',
+  ALREADY_FRIENDS: 'You are already friends with this person.',
+  FRIEND_REQUEST_NOT_FOUND: 'This friend request no longer exists.',
+  FRIEND_REQUEST_EXPIRED: 'This friend request has expired.',
   BLOCKED: 'Communication with this user is not possible.',
   BLOCKING_DISABLED: 'Blocking is disabled by the administration.',
   REPORT_NOT_FOUND: 'This report no longer exists.',

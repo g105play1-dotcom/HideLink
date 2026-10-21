@@ -173,6 +173,8 @@ model Identity {
   reportsAgainst Report[]      @relation("ReportTarget")
   blocksCreated  Block[]       @relation("BlockCreator")
   blocksReceived Block[]       @relation("BlockTarget")
+  friendshipsAsA Friendship[] @relation("FriendshipA")
+  friendshipsAsB Friendship[] @relation("FriendshipB")
   securityEvents SecurityEvent[]
   archiveSubjects ArchiveSubject[]
   ownerMessages OwnerMessage[]
@@ -307,6 +309,37 @@ model Block {
 
   @@unique([blockerId, blockedId])
   @@index([blockedId])
+}
+
+// -----------------------------------------------------------------------------
+// Friends
+// -----------------------------------------------------------------------------
+
+/// A mutual, persistent link between two identities.
+///
+/// Created only when both people explicitly agreed while sharing a chat, and only
+/// ever stores the two internal ids plus the moment of consent. It is *not* a
+/// contact list with names: the public User IDs are read through the relations, and
+/// no message, presence or chat metadata is attached. Either side may remove the row
+/// at any time; blocking or reporting the other person removes it as part of the same
+/// database transaction. See docs/DECISIONS.md D34.
+///
+/// The pair is canonical: `userIdA < userIdB`, enforced by a check constraint in the
+/// migration. That makes the unique index sufficient to prevent a duplicate friendship
+/// regardless of which side initiated it.
+model Friendship {
+  id String @id @default(uuid(7)) @db.Uuid
+
+  userIdA String @db.Uuid
+  userIdB String @db.Uuid
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  userA Identity @relation("FriendshipA", fields: [userIdA], references: [id], onDelete: Cascade)
+  userB Identity @relation("FriendshipB", fields: [userIdB], references: [id], onDelete: Cascade)
+
+  @@unique([userIdA, userIdB])
+  @@index([userIdB])
 }
 
 /// Low-frequency, high-signal technical events used to investigate abuse.

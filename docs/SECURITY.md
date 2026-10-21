@@ -29,7 +29,7 @@ The privacy posture is a storage decision, not a policy paragraph.
 | Name, e-mail, phone, address, GPS, device id | **Never asked for, never stored.** There is no code path that accepts them. |
 | Client IP / User-Agent | **Not stored by default.** Only a salted SHA-256 digest, and only when `ABUSE_HASH_SALT` is deliberately set. |
 | Session token | Only its SHA-256 digest (`IdentityService.createIdentity` → `sha256Hex(token)`). |
-| Public User ID, settings, blocks, reports, security events | Stored. These are the only durable rows (plus the optional archive). |
+| Public User ID, settings, blocks, reports, **friendships**, security events | Stored. These are the only durable rows (plus the optional archive). A friendship is just two internal identities and a creation timestamp — no alias, transcript, presence or contact data. |
 
 `apps/api/test/persistence.test.ts` reads the database directly and searches every text column of
 every table for a message that was just sent; it also asserts the column set of `Identity` and
@@ -44,18 +44,21 @@ only stored text a user is told about.
 
 **Assets.** (a) the content of a live chat; (b) the link between a public User ID and a person;
 (c) the session cookie; (d) a user's declared profile/filters and availability setting; (e) the
-integrity of moderation (blocks and reports must mean something).
+integrity of moderation (blocks and reports must mean something); (f) the social graph — which two
+identities agreed to be friends.
 
 **Adversaries considered.**
 
 | Adversary | Considered, and how it is met |
 | --- | --- |
 | A stranger who knows (or guesses) a User ID | The ID is not a credential: `GET /users/:publicId` returns existence and request policy only; lookups are rate limited per identity. |
-| Another user in the same random chat | Authorisation is per chat and per participant; messages are rendered per socket (`from: 'you' \| 'peer'`); the peer's User ID is never sent. |
+| Another user in the same random chat | Authorisation is per chat and per participant; messages are rendered per socket (`from: 'you' \| 'peer'`); the peer's User ID is never sent. A friend request is visible only to the two participants and is answered inside the live chat. |
 | A third party who learns a `chatId` | Joining, sending into, ending or blocking in someone else's chat is refused with `NOT_A_PARTICIPANT` / `CHAT_NOT_FOUND`. Covered by `apps/api/test/chat.test.ts` and `tests/e2e/specs/access.spec.ts`. |
+| A friend or an ex-friend | A friendship reveals the other User ID and the date, nothing else: no presence, no transcript, no "message" channel. Either side can remove the link; the other side is told, but not who else they know or when they are online. Blocking, reporting or rotating an ID severs the link. |
+| A forged social-network launch proof (planned) | Nothing accepts one today. The planned contract requires server-side HMAC/signature verification and a server-issued token; a browser-asserted `externalId` is never trusted (`docs/INTEGRATIONS.md`). |
 | A malicious web page in the same browser | `SameSite=Lax` cookie + exact `Origin` allow-list on state-changing HTTP requests and on the WebSocket handshake. |
-| An abuser with automation | Token-bucket rate limits per identity and per address, socket cap per identity, message length and payload ceilings, block/report. |
-| Someone who exfiltrates the database | Session rows hold digests, not tokens; no client identifiers unless the operator opted in. Transcripts exist only where the owner's archive selected them, and those are **plaintext** (§13) — the archive is the one asset a database thief would want. |
+| An abuser with automation | Token-bucket rate limits per identity and per address, socket cap per identity, message length and payload ceilings, block/report. Friend requests reuse the `connectRequest` budget and are capped at one per chat. |
+| Someone who exfiltrates the database | Session rows hold digests, not tokens; no client identifiers unless the operator opted in. Transcripts exist only where the owner's archive selected them, and those are **plaintext** (§13) — the archive is the one asset a database thief would want. Friendships reveal the pair and date, not the conversation. |
 | An authenticated user probing the API | One global guard, one validation path, error codes instead of messages. |
 
 **Out of scope.** A compromised server process or database while running (it holds plaintext chats
@@ -80,7 +83,8 @@ verification, which does not exist.
   before any handler exists.
 - `DELETE /session` revokes every session of the identity and issues a **new** identity
   ("Новый ID"). The old User ID keeps its existing blocks and reports, so rotating an ID is not a
-  way to escape a block or a report.
+  way to escape a block or a report. Its friendships are deleted silently: notifying old contacts
+  would announce that the person used the panic button (`docs/DECISIONS.md` D34).
 - The public User ID is never accepted as proof of anything: no route or event takes it as a
   credential. Format is `AL` + 12 Crockford Base32 characters, generated with a CSPRNG and backed by
   a unique index with a retry loop.
@@ -125,6 +129,7 @@ schemas, so a client cannot smuggle extra columns into a settings write.
 | Socket packet | 64 kB (`maxHttpBufferSize`) | `socket-io.adapter.ts` |
 | `clientMessageId` | `[A-Za-z0-9_-]{1,64}` | `packages/shared` |
 | Report details / request note | schema-capped, and the abuse-hash fields are redacted from logs | `packages/shared`, `logger.ts` |
+| Friend request / answer | `chatId` must be a UUID, one request per chat, only the addressee may answer | `packages/shared`, `chat.service.ts` |
 
 `sanitizeMessageText` removes control and zero-width characters, caps blank-line runs, and truncates
 by code point rather than by UTF-16 unit, so an emoji is never split.
@@ -140,11 +145,12 @@ identity when known and by client address otherwise:
 | `sessionCreate` | 30/hour | `POST /session` |
 | `chatMessage` | 20/10 s | `chat:message` |
 | `lookup` | 20/min | `GET /users/:publicId` |
-| `connectRequest` | 10/min | `request:send` |
+| `connectRequest` | 10/min | `request:send` and `friend:request` |
 
 Plus: `MAX_SOCKETS_PER_USER` (default 4) simultaneous sockets per identity, enforced at the handshake
 *before* the socket joins any room; `MAX_PENDING_REQUESTS_PER_USER` (default 3) pending outgoing
-direct requests; and a reconnect grace of `PEER_RECONNECT_GRACE_MS` before a chat is abandoned.
+direct requests; `FRIEND_REQUEST_TTL_MS` (60 s, one request per chat); and a reconnect grace of
+`PEER_RECONNECT_GRACE_MS` before a chat is abandoned.
 
 Two deliberate properties:
 
@@ -203,16 +209,62 @@ would become a way to send a message).
   attempt from the in-memory directory cache, and direct requests check the database — so
   reconnecting, rotating a socket or restarting a tab does not bypass a block.
   `tests/e2e/specs/access.spec.ts` and `apps/api/test/moderation.test.ts` cover it.
-- Blocking the peer of a chat also ends that chat and cancels any pending invitation between the two
-  (`ChatService.blockPeerOfChat`).
+- Blocking the peer of a chat also ends that chat, cancels any pending invitation between the two and
+  deletes their friendship in the same database transaction (`ChatService.blockPeerOfChat`,
+  `ModerationService.blockPeer`).
 - A block cannot be used as a probe: `blockByPublicId` refuses a target that does not exist with the
   same `USER_NOT_FOUND` as the lookup, and self-block is refused explicitly.
 - A report ends the chat, takes its message snapshot from the server's own copy (never from client
-  input), and is hard-deleted after `REPORT_RETENTION_DAYS`.
+  input), deletes any friendship with the reported peer in the same transaction, and is hard-deleted
+  after `REPORT_RETENTION_DAYS`.
 - `ModerationService.ban` marks the identity, revokes all its sessions, and the guard then refuses it
   everywhere. **Honest limitation:** banning an anonymous identity cannot outlast the identity. There
   is no registration and no device fingerprint (deliberately), so a banned person who clears cookies
   starts over. Bans are a speed bump for abuse, not a ban of a human, and no code claims otherwise.
+
+## 10.1 Friendships
+
+**Implemented.**
+
+- A friendship can be requested only by a participant of an **active** chat, with `friend:request` and
+  that chat's id. `ChatService.requestFriend` re-checks participation and activity after every await,
+  so a chat ending mid-request cannot leave a question for a dead conversation.
+- The recipient sees the per-chat alias, never the requester's User ID. The User IDs are sent only in
+  the `friend:resolved` event after acceptance and in `GET /friends`; before that, the random-match
+  rule still applies (`apps/api/src/chat/chat.service.ts`, `apps/api/src/friends/friends.service.ts`).
+- One request per chat; `FRIEND_REQUEST_TTL_MS = 60_000`; only the addressee can answer
+  (`FRIEND_REQUEST_NOT_FOUND` otherwise); a decline or expiry marks the chat closed, so neither side
+  can ask again there. The request is memory-only and is cancelled when the chat ends.
+- `Friendship` stores a canonical pair (`userIdA < userIdB`) with a unique index and a DB `CHECK`;
+  `FriendsService` applies the same ordering, so a pair cannot exist twice in opposite directions.
+  `GET /friends` returns only the caller's list (capped at 200) and `DELETE /friends/:publicId` is
+  unilateral and idempotent. Covered by `apps/api/test/friends.test.ts`.
+- A reload restores a pending question (`session:ready.pendingFriendRequest`) and an existing link
+  (`friendsWithPeer`); a reconnect does not silently drop the question while its 60 seconds are
+  running. `tests/e2e/specs/friends.spec.ts` covers the visible flow.
+- There is no admin surface for friendships. The social graph is not moderation evidence, and the
+  owner's shared key does not need another read path (`docs/DECISIONS.md` D34).
+
+## 10.2 Social integrations (planned, not implemented)
+
+**Not built.** No VK or Telegram code exists. The design constraint is D35 and
+`docs/INTEGRATIONS.md`; this section records the security rules the first integration must satisfy.
+
+- A platform account is linked only after **server-side** verification of the platform proof
+  (Telegram `initData` HMAC, VK launch-parameter signature, or provider server credentials). A
+  client-supplied `externalId`, username or launch payload is untrusted input.
+- The external id is personal data and is never placed in `publicId`, `ChatView`, `FriendView`, the
+  protocol, archive criteria or logs. A link belongs to one internal identity and is removed with it.
+- A platform integration is another client of the same server: it may not write product tables
+  directly, keep a second transcript or bypass filters, blocks, reports, rate limits or friend
+  consent. If the owner's archive is off, the adapter must not create a new durable copy.
+- The standalone site keeps the `HttpOnly`, `SameSite=Lax` cookie. A cookie-less iframe requires a
+  separate short-lived bearer-token mode with the same guard rules; the global cookie policy is not
+  weakened to accommodate an embed.
+- Provider secrets (`VK_*`, `TELEGRAM_*`) live only in the root `.env`; the web bundle never receives
+  them. Platform origins are added to `CORS_ORIGINS` explicitly.
+- A platform ban or report is not automatically an AnonLink ban, and a bot button is not consent to
+  a friendship. Those remain separate, server-decided actions.
 
 ## 11. Privacy *inside* a chat
 
@@ -225,6 +277,9 @@ would become a way to send a message).
 - Direct contact by User ID is the deliberate exception: the person you ask **does** see your User
   ID, because you typed theirs. The interface states this above the input, before the button is
   pressed (`apps/web/src/components/direct-panel.tsx`).
+- A friendship is the second, narrower exception: after both sides explicitly accept in a live chat,
+  each sees the other's User ID and the date. It reveals no alias history, no presence and no
+  transcript; either side can remove it (`docs/DECISIONS.md` D34).
 - Declared profile and filters are never returned to another identity: no view type exposes them, and
   `ChatSession`/`Report` are the only places two identities are linked.
 - The typing indicator was dropped from the MVP rather than shipped: it leaks activity patterns to
@@ -243,12 +298,15 @@ which is the enforcement point for every deadline in the schema:
 | Archived conversations (§13) | after the owner's `retentionDays`; `0` means only when the owner deletes them |
 | "Связаться с администрацией" messages (§13.1) | after `OWNER_MESSAGE_RETENTION_DAYS` (180) |
 | Finished chats in memory | after their tombstone expires (`ChatRegistryService.sweep`) |
+| Pending direct and friend requests | when their 60-second deadline passes, when the chat ends, or on a restart (memory only) |
 | Stale queue tickets, expired requests, rate-limit keys | every sweep |
 
 `Identity` rows are deliberately **never** deleted: they hold a random public ID and timestamps, no
 personal data, and deleting one would cascade away the reports that describe the abuse it may have
 committed. The consequence is that a "deleted" account is not a thing — a user who wants a fresh
-start gets a new identity, and the old row remains as an abuse record.
+start gets a new identity, and the old row remains as an abuse record. `Friendship` rows likewise have
+no expiry: they are deleted when either side removes the contact, and by a block, a report or an
+identity rotation (`docs/DECISIONS.md` D34).
 
 The sweep interval is `MAINTENANCE_INTERVAL_MS` (default 15 s). Setting it to `0` disables retention
 entirely, which the integration tests use on purpose — a production deployment must not do that.

@@ -59,11 +59,24 @@ export class ModerationService {
    * may have tapped a stale "block" button.
    */
   async block(blockerId: string, blockedId: string): Promise<void> {
-    await this.prisma.block.upsert({
-      where: { blockerId_blockedId: { blockerId, blockedId } },
-      create: { blockerId, blockedId },
-      update: {},
-    });
+    // A block severs a friendship in the same transaction. Leaving the friendship row
+    // behind would keep the blocked person in the blocker's friend list and let the list
+    // offer a "write" action that can only fail.
+    await this.prisma.$transaction([
+      this.prisma.block.upsert({
+        where: { blockerId_blockedId: { blockerId, blockedId } },
+        create: { blockerId, blockedId },
+        update: {},
+      }),
+      this.prisma.friendship.deleteMany({
+        where: {
+          OR: [
+            { userIdA: blockerId, userIdB: blockedId },
+            { userIdA: blockedId, userIdB: blockerId },
+          ],
+        },
+      }),
+    ]);
 
     this.directory.recordBlock(blockerId, blockedId);
     log.security('block.created', {});
@@ -128,20 +141,32 @@ export class ModerationService {
       Date.now() + this.config.REPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
     );
 
-    await this.prisma.report.create({
-      data: {
-        id: reportId,
-        reporterId: input.reporterId,
-        targetId: input.targetId,
-        reason: input.reason,
-        status: 'open',
-        expiresAt,
-        ...(input.chatId ? { chatId: input.chatId } : {}),
-        ...(input.messageId ? { messageId: input.messageId } : {}),
-        ...(input.messageSnapshot ? { messageSnapshot: input.messageSnapshot } : {}),
-        ...(input.details ? { details: input.details } : {}),
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.report.create({
+        data: {
+          id: reportId,
+          reporterId: input.reporterId,
+          targetId: input.targetId,
+          reason: input.reason,
+          status: 'open',
+          expiresAt,
+          ...(input.chatId ? { chatId: input.chatId } : {}),
+          ...(input.messageId ? { messageId: input.messageId } : {}),
+          ...(input.messageSnapshot ? { messageSnapshot: input.messageSnapshot } : {}),
+          ...(input.details ? { details: input.details } : {}),
+        },
+      }),
+      // Reporting a friend is a safety action: the link must not survive it, or the
+      // reported person would keep a one-click way back to the reporter.
+      this.prisma.friendship.deleteMany({
+        where: {
+          OR: [
+            { userIdA: input.reporterId, userIdB: input.targetId },
+            { userIdA: input.targetId, userIdB: input.reporterId },
+          ],
+        },
+      }),
+    ]);
 
     // Deliberately logs no reason and no content: the report row is the record.
     log.security('report.created', { retentionDays: this.config.REPORT_RETENTION_DAYS });

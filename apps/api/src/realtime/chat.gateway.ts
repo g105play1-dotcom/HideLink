@@ -8,11 +8,16 @@ import {
   connectRequestSchema,
   connectRespondSchema,
   errorMessage,
+  friendRequestSchema,
+  friendRespondSchema,
   matchJoinSchema,
   reportSchema,
   type ChatMessageInput,
   type ConnectRequestInput,
   type ConnectRespondInput,
+  type FriendRequestInput,
+  type FriendRespondInput,
+  type FriendView,
   type ReportInput,
 } from '@anonlink/shared';
 import {
@@ -42,6 +47,7 @@ import {
   endedReasonFor,
 } from '../chat/chat.views.js';
 import { DirectoryService } from '../directory/directory.service.js';
+import type { FriendshipRecord } from '../friends/friends.service.js';
 import { IdentityService } from '../identity/identity.service.js';
 import type { AuthenticatedIdentity } from '../identity/identity.service.js';
 import { PresenceService } from '../presence/presence.service.js';
@@ -126,6 +132,8 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     'request:respond',
     'report:send',
     'block:peer',
+    'friend:request',
+    'friend:respond',
   ]);
 
   constructor(
@@ -207,7 +215,10 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       if (registration.firstSocket) await this.chat.handleConnected(identity.userId);
 
       const state = this.chat.stateFor(identity.userId);
-      socket.emit('session:ready', this.buildSessionReady(identity, state));
+      const friendsWithPeer = state.activeChat
+        ? await this.chat.areChatPeersFriends(identity.userId)
+        : false;
+      socket.emit('session:ready', this.buildSessionReady(identity, state, friendsWithPeer));
 
       // The transcript is re-attached for *every* socket, not just the first one:
       // otherwise a second tab, or a reconnect that reused an existing socket, would
@@ -250,6 +261,7 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
   private buildSessionReady(
     identity: AuthenticatedIdentity,
     state: ChatState,
+    friendsWithPeer: boolean,
   ): SessionReadyPayload {
     return {
       protocolVersion: PROTOCOL_VERSION,
@@ -264,6 +276,18 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       // the real ones — and possibly dropping them one by one.
       ...(state.queued ? { search: this.chat.searchStatus(identity.userId) } : {}),
       ...(state.activeChat ? { activeChat: buildChatView(state.activeChat, identity.userId) } : {}),
+      ...(state.activeChat ? { friendsWithPeer } : {}),
+      ...(state.pendingFriendRequest
+        ? {
+            pendingFriendRequest: {
+              requestId: state.pendingFriendRequest.requestId,
+              chatId: state.pendingFriendRequest.chatId,
+              alias: state.pendingFriendRequest.alias,
+              expiresAt: state.pendingFriendRequest.expiresAt.toISOString(),
+              direction: state.pendingFriendRequest.direction,
+            },
+          }
+        : {}),
     };
   }
 
@@ -380,6 +404,29 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
         this.emitToUser(userId, 'peer:blocked', { publicId, chatId: input.chatId });
         return { blocked: true, publicId };
       });
+    });
+
+    socket.on('friend:request', (...args) => {
+      void this.guard(
+        socket,
+        'friend:request',
+        args,
+        friendRequestSchema,
+        'connectRequest',
+        (input: FriendRequestInput, userId) => this.chat.requestFriend(userId, input.chatId),
+      );
+    });
+
+    socket.on('friend:respond', (...args) => {
+      void this.guard(
+        socket,
+        'friend:respond',
+        args,
+        friendRespondSchema,
+        null,
+        (input: FriendRespondInput, userId) =>
+          this.chat.respondToFriendRequest(userId, input.requestId, input.accept),
+      );
     });
   }
 
@@ -542,6 +589,33 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
         });
         return;
 
+      case 'friend.incoming':
+        // Only the per-chat alias crosses the wire here. The requester's User ID is
+        // disclosed after acceptance, through the friendship itself.
+        this.emitToUser(event.request.toUserId, 'friend:incoming', {
+          requestId: event.request.requestId,
+          chatId: event.request.chatId,
+          alias: event.request.fromAlias,
+          expiresAt: new Date(event.request.expiresAt).toISOString(),
+        });
+        return;
+
+      case 'friend.resolved':
+        for (const userId of [event.request.fromUserId, event.request.toUserId]) {
+          const friend = event.friendship ? friendshipViewFor(event.friendship, userId) : undefined;
+          this.emitToUser(userId, 'friend:resolved', {
+            requestId: event.request.requestId,
+            chatId: event.request.chatId,
+            status: event.status,
+            ...(friend ? { friend } : {}),
+          });
+        }
+        return;
+
+      case 'friend.removed':
+        this.emitToUser(event.userId, 'friend:removed', { publicId: event.publicId });
+        return;
+
       case 'session.rotated':
         // The sockets on this identity are authenticated as a session that no longer
         // exists; close them so nothing can act with revoked credentials.
@@ -573,4 +647,15 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
       addresser.to(socketId).emit(event, payload);
     }
   }
+}
+
+/** The friendship as one participant sees it: the *other* person's ID, and the date. */
+function friendshipViewFor(record: FriendshipRecord, userId: string): FriendView | undefined {
+  if (record.userIdA === userId) {
+    return { publicId: record.publicIdB, since: record.createdAt.toISOString() };
+  }
+  if (record.userIdB === userId) {
+    return { publicId: record.publicIdA, since: record.createdAt.toISOString() };
+  }
+  return undefined;
 }

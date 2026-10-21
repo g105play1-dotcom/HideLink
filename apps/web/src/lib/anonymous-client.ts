@@ -15,6 +15,8 @@ import {
   type RespondRequestResult,
   type ReportResult,
   type BlockPeerResult,
+  type FriendRequestResult,
+  type FriendRespondResult,
   type ServerToClientEvents,
   type SessionReadyPayload,
 } from '@anonlink/protocol';
@@ -304,6 +306,61 @@ class AnonymousClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Friends
+  // ---------------------------------------------------------------------------
+
+  /** Asks the current chat peer to become a friend. */
+  async requestFriend(): Promise<CommandOutcome> {
+    const state = useAppStore.getState();
+    const chatId = state.chat?.chatId;
+    if (!chatId) return this.failWith(activeT('Чат не найден.'));
+
+    const result = await this.command<FriendRequestResult>('friend:request', { chatId });
+    if (!result.ok) return this.failed(result.error);
+
+    const current = useAppStore.getState();
+    if (result.data.accepted) {
+      current.setFriendsInChat(true);
+      current.setOutgoingFriendRequest(null);
+      current.setIncomingFriendRequest(null);
+      current.bumpFriendsVersion();
+      current.notify('success', activeT('Теперь вы друзья.'));
+      return { ok: true };
+    }
+
+    current.setOutgoingFriendRequest({
+      requestId: result.data.requestId,
+      chatId: result.data.chatId,
+      alias: current.chat?.chatId === result.data.chatId ? current.chat.peerAlias : '',
+      expiresAt: result.data.expiresAt,
+    });
+    return { ok: true };
+  }
+
+  /** Accepts or declines a friend request shown in the dialog. */
+  async respondToFriendRequest(requestId: string, accept: boolean): Promise<CommandOutcome> {
+    const result = await this.command<FriendRespondResult>('friend:respond', {
+      requestId,
+      accept,
+    });
+
+    const current = useAppStore.getState();
+    current.clearFriendRequest(requestId);
+
+    if (!result.ok) return this.failed(result.error);
+
+    if (result.data.accepted) {
+      current.setFriendsInChat(true);
+      current.bumpFriendsVersion();
+      current.notify('success', activeT('Теперь вы друзья.'));
+    } else if (!accept) {
+      current.setFriendRequestOutcome('declined');
+    }
+
+    return { ok: true };
+  }
+
+  // ---------------------------------------------------------------------------
   // Socket lifecycle
   // ---------------------------------------------------------------------------
 
@@ -398,7 +455,13 @@ class AnonymousClient {
     });
 
     socket.on('session:ready', (payload) => this.onSessionReady(payload));
-    socket.on('session:rotated', () => useAppStore.getState().clearConversation());
+    socket.on('session:rotated', () => {
+      const store = useAppStore.getState();
+      store.clearConversation();
+      // The old identity's friendships were deleted silently, so the list must not keep
+      // showing contacts that no longer belong to this User ID.
+      store.bumpFriendsVersion();
+    });
 
     socket.on('match:queued', (payload) => {
       const store = useAppStore.getState();
@@ -451,8 +514,13 @@ class AnonymousClient {
     socket.on('chat:peer-back', () => useAppStore.getState().setPeerAway(false));
 
     socket.on('chat:ended', (payload) => {
-      useAppStore.getState().endChat(payload.chatId, payload.reason);
-      useAppStore.getState().setOutgoingRequest(null);
+      const store = useAppStore.getState();
+      store.endChat(payload.chatId, payload.reason);
+      store.setOutgoingRequest(null);
+      // A report or a block severs a friendship in the same database transaction. Bumping
+      // the version makes an idle list in another tab refetch instead of offering a dead
+      // contact.
+      store.bumpFriendsVersion();
     });
 
     socket.on('request:incoming', (payload) => {
@@ -481,6 +549,66 @@ class AnonymousClient {
 
     socket.on('peer:blocked', () => {
       useAppStore.getState().notify('success', activeT('Пользователь заблокирован.'));
+    });
+
+    socket.on('friend:incoming', (payload) => {
+      const store = useAppStore.getState();
+      if (store.chat?.chatId !== payload.chatId) return;
+
+      store.setIncomingFriendRequest({
+        requestId: payload.requestId,
+        chatId: payload.chatId,
+        alias: payload.alias,
+        expiresAt: payload.expiresAt,
+      });
+      store.notify(
+        'info',
+        activeT('{alias} хочет добавить вас в друзья.', { alias: payload.alias }),
+      );
+    });
+
+    socket.on('friend:resolved', (payload) => {
+      const store = useAppStore.getState();
+      const wasOutgoing = store.outgoingFriendRequest?.requestId === payload.requestId;
+      store.clearFriendRequest(payload.requestId);
+
+      if (payload.status === 'accepted') {
+        if (store.chat?.chatId === payload.chatId) store.setFriendsInChat(true);
+        store.bumpFriendsVersion();
+        store.notify('success', activeT('Теперь вы друзья.'));
+        return;
+      }
+
+      // A late outcome for a chat that is already gone must not change the current one.
+      if (store.chat?.chatId !== payload.chatId) return;
+
+      if (payload.status === 'declined') {
+        store.setFriendRequestOutcome('declined');
+        if (wasOutgoing) {
+          store.notify('info', activeT('Собеседник отклонил заявку в друзья.'));
+        }
+        return;
+      }
+
+      if (payload.status === 'expired') {
+        store.setFriendRequestOutcome('expired');
+        store.notify('info', activeT('Время заявки в друзья истекло.'));
+        return;
+      }
+
+      if (payload.status === 'unavailable') {
+        store.setFriendRequestOutcome('unavailable');
+        store.notify('info', activeT('Сейчас нельзя добавить этого собеседника в друзья.'));
+        return;
+      }
+
+      // `cancelled` accompanies the chat ending; the chat screen explains that already.
+    });
+
+    socket.on('friend:removed', () => {
+      const store = useAppStore.getState();
+      store.bumpFriendsVersion();
+      store.notify('info', activeT('Контакт удалён из списка друзей.'));
     });
 
     socket.on('app:error', (payload) => this.onServerError(payload));
@@ -512,6 +640,34 @@ class AnonymousClient {
     // for the case where it has not been delivered yet.
     if (payload.activeChat && !useAppStore.getState().chat) {
       store.restoreChat(toChatInfo(payload.activeChat, false), []);
+    }
+
+    // The friend question is ephemeral on the server, while the friendship itself is
+    // durable. A reload therefore has to ask the server both things: whether a request
+    // is still waiting for an answer, and whether these two are already friends.
+    const current = useAppStore.getState();
+    current.resetFriendRequests();
+    if (payload.activeChat) {
+      if (payload.friendsWithPeer) current.setFriendsInChat(true);
+
+      const pending = payload.pendingFriendRequest;
+      if (pending && pending.chatId === payload.activeChat.chatId) {
+        const request = {
+          requestId: pending.requestId,
+          chatId: pending.chatId,
+          alias: pending.alias,
+          expiresAt: pending.expiresAt,
+        };
+        if (pending.direction === 'incoming') {
+          current.setIncomingFriendRequest(request);
+          current.notify(
+            'info',
+            activeT('{alias} ждёт ответа на заявку в друзья.', { alias: pending.alias }),
+          );
+        } else {
+          current.setOutgoingFriendRequest(request);
+        }
+      }
     }
 
     if (payload.queued && !useAppStore.getState().chat) {

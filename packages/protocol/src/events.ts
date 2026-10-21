@@ -27,6 +27,10 @@ export const ClientEvent = {
   ReportSend: 'report:send',
   /** Block the peer of the current chat. */
   BlockPeer: 'block:peer',
+  /** Ask the current chat peer to become a friend. */
+  FriendRequest: 'friend:request',
+  /** Accept or decline an incoming friend request. */
+  FriendRespond: 'friend:respond',
 } as const;
 
 export type ClientEventName = (typeof ClientEvent)[keyof typeof ClientEvent];
@@ -66,6 +70,12 @@ export const ServerEvent = {
   RequestResolved: 'request:resolved',
   /** The peer was blocked; any shared chat is over. */
   PeerBlocked: 'peer:blocked',
+  /** The current chat peer wants to become friends. */
+  FriendIncoming: 'friend:incoming',
+  /** Outcome of a friend request this client sent or answered. */
+  FriendResolved: 'friend:resolved',
+  /** The other side removed this client from their friends. */
+  FriendRemoved: 'friend:removed',
   /** Non-fatal error, always addressed to a single socket. */
   Error: 'app:error',
 } as const;

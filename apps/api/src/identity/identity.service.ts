@@ -208,10 +208,18 @@ export class IdentityService {
    * is what makes it a usable panic button after a bad conversation.
    */
   async rotate(current: AuthenticatedIdentity, meta: SessionMeta = {}): Promise<IssuedSession> {
-    await this.prisma.session.updateMany({
-      where: { identityId: current.userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    // The old social graph must not survive the old identity. It is deleted silently,
+    // without notifying the other side: a new User ID is a panic button, and telling
+    // friends "this person rotated" would defeat it. They simply see the contact gone.
+    await this.prisma.$transaction([
+      this.prisma.session.updateMany({
+        where: { identityId: current.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      this.prisma.friendship.deleteMany({
+        where: { OR: [{ userIdA: current.userId }, { userIdB: current.userId }] },
+      }),
+    ]);
 
     log.security('identity.rotated', {});
     return this.createIdentity(meta);

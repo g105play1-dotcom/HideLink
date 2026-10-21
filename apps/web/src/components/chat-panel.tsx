@@ -12,7 +12,10 @@ import {
   RefreshCw,
   Search,
   SkipForward,
+  Timer,
   TriangleAlert,
+  UserCheck,
+  UserPlus,
   UserRound,
   WifiOff,
 } from 'lucide-react';
@@ -26,7 +29,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { describeChatEnd } from '@/lib/error-text';
-import { formatTime } from '@/lib/format';
+import { formatRemaining, formatTime } from '@/lib/format';
+import { useTicker } from '@/lib/use-ticker';
 import { cn } from '@/lib/utils';
 import { useAppStore, type ChatInfo, type UiMessage } from '@/store/app-store';
 
@@ -59,9 +63,16 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
   const ended = useAppStore((state) => state.endedChat);
   const maxLength = useAppStore((state) => state.messageMaxLength);
   const clearConversation = useAppStore((state) => state.clearConversation);
+  const friendsInChat = useAppStore((state) => state.friendsInChat);
+  const incomingFriendRequest = useAppStore((state) => state.incomingFriendRequest);
+  const outgoingFriendRequest = useAppStore((state) => state.outgoingFriendRequest);
+  const friendRequestOutcome = useAppStore((state) => state.friendRequestOutcome);
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Countdown for the outgoing friend request, if there is one.
+  const now = useTicker(outgoingFriendRequest !== null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -107,6 +118,29 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
   // `peer_left` for the other side.
   const peerPublicId = chat.peerPublicId;
   const canWriteAgain = chat.kind === 'direct' && ended?.reason !== 'blocked';
+
+  const friendOutcomeLabel =
+    friendRequestOutcome === 'declined'
+      ? t('Заявка отклонена')
+      : friendRequestOutcome === 'expired'
+        ? t('Время истекло')
+        : friendRequestOutcome === 'unavailable' || friendRequestOutcome === 'cancelled'
+          ? t('Недоступно')
+          : null;
+  const friendLabel = friendsInChat
+    ? t('Вы друзья')
+    : outgoingFriendRequest
+      ? t('Запрос отправлен')
+      : incomingFriendRequest
+        ? t('Заявка в друзья')
+        : (friendOutcomeLabel ?? t('В друзья'));
+  const canRequestFriend =
+    !ended &&
+    !friendsInChat &&
+    !outgoingFriendRequest &&
+    !incomingFriendRequest &&
+    friendRequestOutcome === null &&
+    !busy;
 
   return (
     <Card
@@ -163,6 +197,19 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
 
         {!ended ? (
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!canRequestFriend}
+              onClick={() => void run(() => client.requestFriend())}
+            >
+              {friendsInChat ? (
+                <UserCheck className="size-4" aria-hidden="true" />
+              ) : (
+                <UserPlus className="size-4" aria-hidden="true" />
+              )}
+              <span className="sr-only sm:not-sr-only">{friendLabel}</span>
+            </Button>
             {canBlock ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onBlock}>
                 <Ban className="size-4" aria-hidden="true" />
@@ -194,6 +241,20 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
           </div>
         ) : null}
       </CardHeader>
+
+      {!ended && outgoingFriendRequest ? (
+        <div
+          className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-card px-4 py-2 text-xs text-muted-foreground"
+          role="status"
+        >
+          <Timer className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+          <span>{t('Запрос в друзья отправлен.')}</span>
+          <span>{t('Истекает через:')}</span>
+          <span className="font-mono tabular-nums">
+            {formatRemaining(outgoingFriendRequest.expiresAt, now, locale)}
+          </span>
+        </div>
+      ) : null}
 
       {/* --- transcript ----------------------------------------------------- */}
       <CardContent

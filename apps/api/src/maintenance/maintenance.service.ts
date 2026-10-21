@@ -15,6 +15,8 @@ export interface MaintenanceReport {
   expiredTickets: number;
   /** Direct invitations that passed their deadline. */
   expiredRequests: number;
+  /** In-chat friend requests that passed their deadline. */
+  expiredFriendRequests: number;
   /** Finished chats evicted from memory after their tombstone expired. */
   prunedChats: number;
   /** Searches widened because their owner waited too long with filters on. */
@@ -103,6 +105,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
     const empty: MaintenanceReport = {
       expiredTickets: 0,
       expiredRequests: 0,
+      expiredFriendRequests: 0,
       prunedChats: 0,
       widenedSearches: 0,
       relaxedMatches: 0,

@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import type { MatchCancelReason, RequestStatus } from '@anonlink/protocol';
+import type { FriendRequestStatus, MatchCancelReason, RequestStatus } from '@anonlink/protocol';
 import type { RelaxableCriterion, SearchPreferences } from '@anonlink/shared';
 
 import { log } from '../common/logger.js';
 import type { ChatRecord, StoredMessage } from '../chat/chat.registry.js';
 import type { ConnectionRequest } from '../chat/chat.requests.js';
+import type { FriendRequest } from '../friends/friend-requests.js';
+import type { FriendshipRecord } from '../friends/friends.service.js';
 
 /**
  * The application's single in-process event bus.
@@ -66,6 +68,24 @@ export type AppEvent =
       status: RequestStatus;
       chat?: ChatRecord;
     }
+  // --- friendships ---------------------------------------------------------
+  /** A chat participant asked the other one to become friends. */
+  | { type: 'friend.incoming'; request: FriendRequest }
+  /**
+   * The outcome of a friend request, addressed to both participants.
+   *
+   * On acceptance, `friendship` is present and each side is shown the *other* person's
+   * User ID. On refusal, expiry or cancellation it is absent: nothing about the peer
+   * beyond the per-chat alias has been disclosed.
+   */
+  | {
+      type: 'friend.resolved';
+      request: FriendRequest;
+      status: FriendRequestStatus;
+      friendship?: FriendshipRecord;
+    }
+  /** An explicit removal by the other side. `userId` is the person being told. */
+  | { type: 'friend.removed'; userId: string; publicId: string }
   // --- session lifecycle ---------------------------------------------------
   /**
    * The identity behind these sockets was re-issued (the user asked for a new User

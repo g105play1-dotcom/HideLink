@@ -836,3 +836,98 @@ already exposes, and adding another one is a separate, owner-visible change.
 could then keep the country while dropping every city, which is not the question the user answered);
 storing the native name (a future rename in the source would silently invalidate stored rows); a
 separate country-only section (one "where" question belongs in one row, next to the other two lists).
+
+---
+
+## D34. Friendships require consent inside a live chat, are one row per pair, and die with the identity
+
+**Context.** The brief assumes a contact list, but the product promise is that nothing durable connects
+two strangers unless they choose it. A persistent invitation inbox would recreate the unsolicited
+messaging problem the direct-request flow already limits, and a friend request accepted after a chat has
+ended would let one person retain a handle on another who has moved on. The link also has to mean
+something under the safety actions: a block, a report or the panic button must not leave the other side
+holding a live contact.
+
+**Decision.** A friendship is a mutual, durable pair created only by explicit agreement **inside an
+active chat**. The requester sends `friend:request`; the recipient sees the per-chat alias and answers
+`friend:respond`. Only after acceptance does each side receive the other's User ID and the creation time
+— before that, the random-match rule ("never disclose the peer's User ID") still holds. The request is
+ephemeral and server-side: one per chat, `FRIEND_REQUEST_TTL_MS = 60_000`, no persistent inbox, and a
+decline or expiry closes further requests in that chat. Pressing "add friend" while an incoming request
+is pending **accepts** it rather than creating a second request.
+
+The database stores one `Friendship` row per pair with a canonical order (`userIdA < userIdB`), enforced
+in `FriendsService` and by a `CHECK` constraint, so the same pair cannot be stored twice in opposite
+directions. `GET /friends` returns only the caller's own list (`FRIEND_LIST_LIMIT = 200`), and
+`DELETE /friends/:publicId` is unilateral and idempotent. Blocking or reporting severs the friendship in
+the same transaction as the safety action; identity rotation deletes the old identity's friendships
+silently, because telling the contacts "this person rotated" would defeat the panic button. Friend
+requests live only in `FriendRequestService` memory (like chats); a reload is restored from
+`session:ready` with `pendingFriendRequest` and `friendsWithPeer`.
+
+**Consequences.** The UI offers the action only in an active chat, shows the outgoing countdown and the
+incoming question, and puts the list on the idle screen. Each side sees exactly the other's User ID and
+the date; there are no nicknames, presence, message history or notifications about a friend coming
+online. The list is not exposed in `/admin`, and there is no moderator action on it. A request lost to a
+server restart is lost by design, exactly like an active chat; the friendship already accepted is durable.
+
+**Rejected.** Friend requests outside a chat or from a search result (they would be unsolicited
+messages); a persistent invitation inbox (the same problem, with a larger surface); disclosing IDs when
+the request is sent (the recipient did not consent yet); a separate `FriendRequest` table (the request
+is a one-minute in-memory question, not a record worth retaining); a directional friendship row (two
+rows would let one side believe a link exists after the other removed it); keeping the link across a
+block/report/rotation (the safety action would be cosmetic); showing friends in `/admin` (the owner's
+panel is for moderation, and the social graph is not moderation data).
+
+---
+
+## D35. Social platforms are adapters around the same chat, not forks of it
+
+**Context.** The owner plans to use the chat from social networks (VK and Telegram). Two integration
+shapes are possible and they have different trust boundaries: a hosted web app inside a platform
+webview/mini-app (VK Mini Apps, Telegram Mini App), and a server-side bot or community adapter that
+relays messages between the platform and this service. Building platform-specific types into the chat
+now would make both harder, and accepting a platform account id from the browser would break the
+"server is the authority" rule before the first integration exists.
+
+**Decision.** The product stays **provider-agnostic**. The chat domain (`apps/api/src/chat`,
+`apps/api/src/friends`, `packages/shared`, `packages/protocol`) must not import a VK/Telegram SDK,
+platform type or platform id. Every integration enters through an adapter:
+
+- **Hosted web app (webview/mini-app).** The existing Next.js app is loaded from our own HTTPS origin and
+  keeps using the same REST and Socket.IO surface. A thin client adapter may read the platform's theme,
+  back button, share sheet and launch parameters; it must not talk to Prisma or make authorisation
+  decisions. If the host embeds the app in a third-party iframe where cookies are blocked, that is a
+  separate token-bootstrap mode, not a reason to loosen `SameSite`/`HttpOnly` for everyone.
+- **Server-side bot/community adapter.** A future `apps/api/src/integrations/<provider>/` module verifies
+  the platform's server-to-server credentials and calls the **same domain services** as the gateway.
+  It may not write chat or friendship rows directly, bypass filters, blocks, rate limits, moderation or
+  retention, or invent a second message store. A bot is another client of the server, not a second
+  server.
+
+A platform account is linked to an internal identity only after the server verifies a platform proof
+(Telegram `initData` HMAC, VK launch-parameter signature, or the provider's server-to-server credential).
+The browser is never trusted to assert an external id. The planned storage is one
+`ExternalIdentity(provider, externalId, identityId)` row with a unique `(provider, externalId)`; it is
+not added until an integration is actually built and the owner has decided whether linking is optional,
+how it is disclosed and how it is unlinked. Until then the anonymous cookie remains the only identity.
+
+Secrets (`VK_*`, `TELEGRAM_*`) live in the root `.env` only, never in the browser bundle or the
+repository. Provider callbacks and the hosted app use the same `CORS_ORIGINS` allow-list discipline:
+an unknown origin is refused. Share/deep links, push notifications, platform moderation APIs and an
+account-linking UI are **not built**; the checklist and required changes are in
+`docs/INTEGRATIONS.md`.
+
+**Consequences.** Nothing user-visible changes today. The existing stable event names, `PROTOCOL_VERSION`,
+JSON view types and `ErrorCode` contract are the integration surface, so a future adapter can be added
+without changing the chat or the browser (apart from the adapter's own UI). A social integration will
+still need owner decisions about anonymity (whether an external account may be linked at all), data
+retention, platform review and credentials; none of those are guessed here.
+
+**Rejected.** Forking the chat for each platform or embedding platform ids in `publicId` (two products
+to secure and a correlation handle); putting provider SDKs or signature checks in `ChatGateway` (the
+gateway would become provider-aware and untestable in isolation); trusting `initData`/launch params
+sent by the browser without server verification (a forged platform identity); a separate bot database
+or direct Prisma writes from a bot (two sources of truth and no shared blocks/limits); disabling
+`HttpOnly`/`SameSite` for all users to make one iframe work (a global security downgrade for a local
+problem).

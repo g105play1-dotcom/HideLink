@@ -23,8 +23,8 @@ afterEach(() => {
 });
 
 describe('protocol coverage', () => {
-  it('declares exactly the nine client events', () => {
-    expect(Object.values(ClientEvent)).toHaveLength(9);
+  it('declares exactly the eleven client events', () => {
+    expect(Object.values(ClientEvent)).toHaveLength(11);
   });
 
   for (const name of Object.values(ClientEvent)) {

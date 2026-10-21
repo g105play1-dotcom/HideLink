@@ -82,6 +82,24 @@ export interface BlockListResponse {
   blocks: BlockedUserView[];
 }
 
+/**
+ * One entry in the caller's own friend list.
+ *
+ * A friendship is a *mutual, persistent* link created only when both people agreed
+ * while chatting. It reveals exactly two things to each side: the other person's User
+ * ID and the date the link was created. There is no nickname, presence, shared chat
+ * history or anything else to leak. See docs/DECISIONS.md D34.
+ */
+export interface FriendView {
+  publicId: string;
+  /** When both sides agreed, as an ISO-8601 timestamp. */
+  since: string;
+}
+
+export interface FriendListResponse {
+  friends: FriendView[];
+}
+
 // -----------------------------------------------------------------------------
 // Owner (admin) surface
 // -----------------------------------------------------------------------------

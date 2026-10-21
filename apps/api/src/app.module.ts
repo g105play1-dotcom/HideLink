@@ -9,6 +9,7 @@ import { SecurityHeadersInterceptor } from './common/http-hardening.js';
 import { ConfigModule } from './config/config.module.js';
 import { DirectoryModule } from './directory/directory.module.js';
 import { EventsModule } from './events/events.module.js';
+import { FriendsModule } from './friends/friends.module.js';
 import { HealthModule } from './health/health.module.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { RequestGuard } from './identity/request.guard.js';
@@ -48,6 +49,7 @@ import { RealtimeModule } from './realtime/realtime.module.js';
     ModerationModule,
     ArchiveModule,
     OwnerModule,
+    FriendsModule,
     ChatModule,
     RealtimeModule,
     HealthModule,

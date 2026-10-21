@@ -5,6 +5,9 @@ import type {
   ConnectRequestInput,
   ConnectRespondInput,
   ErrorCode,
+  FriendRequestInput,
+  FriendRespondInput,
+  FriendView,
   IdentitySettingsView,
   RelaxableCriterion,
   ReportInput,
@@ -110,6 +113,32 @@ export interface SessionReadyPayload {
    */
   search?: SearchStatusPayload;
   activeChat?: ChatView;
+  /**
+   * Whether the caller and the other participant of `activeChat` are already friends.
+   *
+   * The button has no other way to know after a reload: a friendship is durable, while a
+   * pending request is ephemeral. Without this a reload during a chat with a friend would
+   * offer "add friend" again, and the server would have to refuse it.
+   */
+  friendsWithPeer?: boolean;
+  /**
+   * A friend request that was pending when this socket connected.
+   *
+   * Friend requests live in the API process, not in a mailbox, so a reload can otherwise
+   * make one disappear from the screen while the other side is still waiting for an
+   * answer. Restoring it is what makes a reload lossless.
+   */
+  pendingFriendRequest?: PendingFriendRequestPayload;
+}
+
+/** A friend request restored after a reconnect, from this client's point of view. */
+export interface PendingFriendRequestPayload {
+  requestId: string;
+  chatId: string;
+  /** The peer's per-chat alias. Never a User ID. */
+  alias: string;
+  expiresAt: string;
+  direction: 'incoming' | 'outgoing';
 }
 
 /** What the server is applying to a search, and when it will start widening it. */
@@ -188,6 +217,34 @@ export interface PeerBlockedPayload {
   chatId?: string;
 }
 
+/**
+ * An in-chat friend request, as shown to the person being asked.
+ *
+ * It deliberately carries only the per-chat alias. The requester's User ID is disclosed
+ * if and only if the request is accepted, at which point both sides learn each other's ID.
+ */
+export interface IncomingFriendPayload {
+  requestId: string;
+  chatId: string;
+  alias: string;
+  expiresAt: string;
+}
+
+export type FriendRequestStatus = 'accepted' | 'declined' | 'expired' | 'cancelled' | 'unavailable';
+
+export interface FriendResolvedPayload {
+  requestId: string;
+  chatId: string;
+  status: FriendRequestStatus;
+  /** Present only when the request was accepted. */
+  friend?: FriendView;
+}
+
+export interface FriendRemovedPayload {
+  /** The User ID of the person who is no longer a friend. */
+  publicId: string;
+}
+
 // ---------------------------------------------------------------------------
 // Client -> server acknowledgement data
 // ---------------------------------------------------------------------------
@@ -232,6 +289,24 @@ export interface BlockPeerResult {
   publicId: string;
 }
 
+/**
+ * Acknowledgement of `friend:request`.
+ *
+ * `accepted` is `true` when the peer had already asked the same question and this call
+ * therefore completed the mutual agreement. In that case `friend:resolved` follows for
+ * both sides; the acknowledgement alone is enough to update the button.
+ */
+export interface FriendRequestResult {
+  requestId: string;
+  chatId: string;
+  expiresAt: string;
+  accepted: boolean;
+}
+
+export interface FriendRespondResult {
+  accepted: boolean;
+}
+
 export interface BlockPeerInput {
   chatId: string;
 }
@@ -260,6 +335,8 @@ export interface ClientToServerEvents {
   'request:respond': (payload: ConnectRespondInput, ack?: AckHandler<RespondRequestResult>) => void;
   'report:send': (payload: ReportInput, ack?: AckHandler<ReportResult>) => void;
   'block:peer': (payload: BlockPeerInput, ack?: AckHandler<BlockPeerResult>) => void;
+  'friend:request': (payload: FriendRequestInput, ack?: AckHandler<FriendRequestResult>) => void;
+  'friend:respond': (payload: FriendRespondInput, ack?: AckHandler<FriendRespondResult>) => void;
 }
 
 /** Events the server may push. */
@@ -278,6 +355,9 @@ export interface ServerToClientEvents {
   'request:incoming': (payload: IncomingRequestPayload) => void;
   'request:resolved': (payload: RequestResolvedPayload) => void;
   'peer:blocked': (payload: PeerBlockedPayload) => void;
+  'friend:incoming': (payload: IncomingFriendPayload) => void;
+  'friend:resolved': (payload: FriendResolvedPayload) => void;
+  'friend:removed': (payload: FriendRemovedPayload) => void;
   'app:error': (payload: ErrorPayload) => void;
 }
 

@@ -1,6 +1,7 @@
 import { ErrorCode } from '@anonlink/shared';
 import type {
   AckResult,
+  ChatView,
   ClientToServerEvents,
   ServerToClientEvents,
   SessionReadyPayload,
@@ -363,11 +364,11 @@ export async function matchPair(
   b: RealtimeClient,
 ): Promise<{
   chatId: string;
-  aStarted: { chat: { chatId: string }; initiator: boolean };
-  bStarted: { chat: { chatId: string }; initiator: boolean };
+  aStarted: { chat: ChatView; initiator: boolean };
+  bStarted: { chat: ChatView; initiator: boolean };
 }> {
-  const aStarted = a.waitFor<{ chat: { chatId: string }; initiator: boolean }>('chat:started');
-  const bStarted = b.waitFor<{ chat: { chatId: string }; initiator: boolean }>('chat:started');
+  const aStarted = a.waitFor<{ chat: ChatView; initiator: boolean }>('chat:started');
+  const bStarted = b.waitFor<{ chat: ChatView; initiator: boolean }>('chat:started');
 
   const aJoin = await joinQueue(a);
   if (!aJoin.ok) throw new Error(`match:join (a) failed: ${JSON.stringify(aJoin.error)}`);

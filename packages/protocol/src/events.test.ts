@@ -34,6 +34,8 @@ const clientEventsSatisfyInterface = {
   [ClientEvent.RequestRespond]: ClientEvent.RequestRespond,
   [ClientEvent.ReportSend]: ClientEvent.ReportSend,
   [ClientEvent.BlockPeer]: ClientEvent.BlockPeer,
+  [ClientEvent.FriendRequest]: ClientEvent.FriendRequest,
+  [ClientEvent.FriendRespond]: ClientEvent.FriendRespond,
 } satisfies Record<ClientEventName, keyof ClientToServerEvents>;
 
 /** Compile-time: every server event name is a key of the server interface. */
@@ -52,6 +54,9 @@ const serverEventsSatisfyInterface = {
   [ServerEvent.RequestIncoming]: ServerEvent.RequestIncoming,
   [ServerEvent.RequestResolved]: ServerEvent.RequestResolved,
   [ServerEvent.PeerBlocked]: ServerEvent.PeerBlocked,
+  [ServerEvent.FriendIncoming]: ServerEvent.FriendIncoming,
+  [ServerEvent.FriendResolved]: ServerEvent.FriendResolved,
+  [ServerEvent.FriendRemoved]: ServerEvent.FriendRemoved,
   [ServerEvent.Error]: ServerEvent.Error,
 } satisfies Record<ServerEventName, keyof ServerToClientEvents>;
 
@@ -72,6 +77,8 @@ describe('event names', () => {
       'chat:leave',
       'chat:message',
       'chat:next',
+      'friend:request',
+      'friend:respond',
       'match:cancel',
       'match:join',
       'report:send',
@@ -89,6 +96,9 @@ describe('event names', () => {
       'chat:peer-back',
       'chat:resumed',
       'chat:started',
+      'friend:incoming',
+      'friend:removed',
+      'friend:resolved',
       'match:cancelled',
       'match:queued',
       'match:relaxed',

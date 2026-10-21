@@ -244,6 +244,7 @@ docs              документация
 | [docs/TESTING.md](docs/TESTING.md) | Что и как проверяется, чего тесты не покрывают |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Принятые решения и почему именно так |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Этапы, что дальше, какие решения нужны от владельца |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Как устроить VK/Telegram-адаптер, не ломая анонимность и серверные правила |
 | [docs/COMPLIANCE.md](docs/COMPLIANCE.md) | Таблица соответствия требованиям со статусами |
 | [AGENTS.md](AGENTS.md) | Правила для разработки в этом репозитории |
 

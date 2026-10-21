@@ -17,6 +17,23 @@ export const CONNECT_REQUEST_NOTE_MAX_LENGTH = 200;
 /** How long a direct connection request stays actionable. */
 export const CONNECT_REQUEST_TTL_MS = 60_000;
 
+/**
+ * How long an in-chat friend request stays actionable.
+ *
+ * Deliberately as short as a direct request: a friend request is a question asked during
+ * one conversation, not a mailbox item. If it is not answered while the chat is alive,
+ * it disappears with the chat.
+ */
+export const FRIEND_REQUEST_TTL_MS = 60_000;
+
+/**
+ * Maximum number of friendships returned by `GET /friends`.
+ *
+ * A friendship is permanent until either side removes it, so the list can only grow. A
+ * cap keeps one response bounded; the newest friendships are returned first.
+ */
+export const FRIEND_LIST_LIMIT = 200;
+
 /** How long an idle matching ticket may stay in the queue before it is dropped. */
 export const MATCH_TICKET_TTL_MS = 5 * 60_000;
 

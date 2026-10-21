@@ -13,8 +13,8 @@ not.
 | **C. Full interface** | Every screen: main, search, settings, direct, chat, blocks, own User ID, loading/empty/error/disconnected states | **Done.** Every rendered control performs a real action. |
 | **D. Filtered search** | Filters in the settings screen, enforced server-side, both directions | **Done.** See `docs/PRODUCT_SPEC.md` §5–§7. |
 | **E. Full chat** | State machine, duplicate/race protection, disconnect ≠ leave | **Done.** Server-authoritative; `PEER_RECONNECT_GRACE_MS` before abandoning a chat. |
-| **F. Direct contact** | Lookup by User ID, requests, availability policy, enumeration protection | **Done.** Contacts/friends list **not** done (see below). |
-| **G. Social and protection** | Blocks, reports, voluntary contact disclosure | **Partially done.** Blocks and reports are complete; "friends/contacts" is not implemented. No contact is ever disclosed automatically. |
+| **F. Direct contact** | Lookup by User ID, requests, availability policy, enumeration protection | **Done.** See `docs/PRODUCT_SPEC.md` §5–§7 and §17. |
+| **G. Social and protection** | Blocks, reports, voluntary contact disclosure, mutual friends | **Done.** Friends are created only by explicit agreement inside an active chat; blocks/reports/rotation sever the link (`docs/DECISIONS.md` D34). |
 | **H. Stabilisation** | Tests, lint, types, build, documentation, compliance table | **Done for the scope above**, with the explicit gaps listed below. |
 | **I. Growth preparation** | Redis seam, media seam, monetisation readiness, deployment sketch | **Partly done, on purpose.** Seams and documentation exist; no second instance, no media, no ads, no payments. |
 | **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is covered by `admin.spec.ts`. |
@@ -32,7 +32,7 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 | Feature | Why not | What would be needed |
 | --- | --- | --- |
 | Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it, and the archive already has inert `storeMedia`/`mediaKind` fields waiting for it) |
-| Contacts / friends list | Brief allows it only after the core chat is solid; nothing in the MVP creates permanent links | A permission model, request/accept flow, and a privacy decision about what a "contact" reveals |
+| VK / Telegram integration | The owner plans it, but no provider credentials, account-linking decision or platform review exists yet | A provider-verified `ExternalIdentity` link, optional bearer-token bootstrap for cookie-less embeds, adapters under `apps/api/src/integrations/` and `apps/web/src/integrations/`, secrets, retention/unlink policy, and platform moderation mapping. Seam: `docs/INTEGRATIONS.md`, D35 |
 | Chat archive *encryption and audit* | The archive itself is built (D21); protecting it further is separate work | Encryption at rest (a volume or a key outside the process), an audit trail of owner actions, and a rehearsed restore that treats transcripts as the sensitive asset |
 | Moderation *accounts* and ban action | The report panel and the platform switch exist (D31), but a second person with the key would be indistinguishable from the owner | A moderator account model, per-person audit trail and a guarded ban endpoint; the panel is already the place they would live |
 | Ads / Premium | Brief forbids fake monetisation; core chat comes first | Real entitlements enforced server-side |
@@ -52,8 +52,15 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
    reading and status-changing half; the reply to the reporter is still manual.
 4. **Measure before scaling**: a load test that establishes how many concurrent chats one process
    holds, then decide whether Redis (D5) is needed.
-5. **Then** pick up a feature from the deferred list, starting with contacts/friends, which is the
-   one the brief assumed and users will ask for first.
+5. **Then** pick up a feature from the deferred list. Friends are now built (D34); the next product
+   gap the owner may want to revisit is a third availability mode, "only people who already know my
+   User ID" (`docs/ROADMAP.md` below).
+6. **Social-network integration (owner's plan, not started).** Before writing a VK or Telegram adapter,
+   decide whether a platform account may be linked to an anonymous identity, how that is disclosed and
+   unlinked, and whether the first shape is a hosted mini-app or a server-side bot. The provider-agnostic
+   seam and checklist are in `docs/INTEGRATIONS.md` (D35). The chat itself does not need to change to
+   prepare for this; an adapter needs `ExternalIdentity`, server-side proof verification, optional
+   bearer bootstrap and provider secrets.
 
 ## Decisions needed from the owner
 

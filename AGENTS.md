@@ -151,6 +151,7 @@ Behaviour changes update the matching document, not just the code:
 | Auth, validation, limits, privacy, secrets | `docs/SECURITY.md` |
 | New tests, new suite, coverage gaps | `docs/TESTING.md` |
 | A decision taken or reversed | `docs/DECISIONS.md` |
+| Social-network adapter, external identity, token bootstrap | `docs/INTEGRATIONS.md` |
 | Plans, owner decisions needed | `docs/ROADMAP.md` |
 | Setup/commands | `README.md` |
 

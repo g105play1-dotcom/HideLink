@@ -7,7 +7,12 @@ import {
   type RelaxableCriterion,
   type SearchPreferences,
 } from '@anonlink/shared';
-import type { ChatKind, ChatMessageView, IncomingRequestPayload } from '@anonlink/protocol';
+import type {
+  ChatKind,
+  ChatMessageView,
+  FriendRequestStatus,
+  IncomingRequestPayload,
+} from '@anonlink/protocol';
 
 import { activeT } from '@/i18n';
 import { randomId } from '@/lib/ids';
@@ -91,6 +96,19 @@ export interface OutgoingRequest {
   expiresAt: string;
 }
 
+/**
+ * A friend request attached to the current chat.
+ *
+ * `alias` is the peer's per-chat label. The peer's User ID is deliberately absent:
+ * it becomes known only after acceptance, through the friend list and `friend:resolved`.
+ */
+export interface FriendRequestState {
+  requestId: string;
+  chatId: string;
+  alias: string;
+  expiresAt: string;
+}
+
 export interface Notice {
   id: string;
   tone: 'info' | 'success' | 'error';
@@ -149,6 +167,21 @@ export interface AppState {
   incomingRequests: IncomingRequest[];
   outgoingRequest: OutgoingRequest | null;
 
+  // --- friends -------------------------------------------------------------
+  /** An unanswered request from the current chat peer, if any. */
+  incomingFriendRequest: FriendRequestState | null;
+  /** A request this client sent in the current chat, if any. */
+  outgoingFriendRequest: FriendRequestState | null;
+  /**
+   * Why the friend question is closed for the current chat: declined, expired, or
+   * impossible because the peer is unavailable. `null` means it can still be asked.
+   */
+  friendRequestOutcome: FriendRequestStatus | null;
+  /** `true` once the server has confirmed a friendship in the current chat. */
+  friendsInChat: boolean;
+  /** Bumped when the friend list changes elsewhere, so a mounted list refetches. */
+  friendsVersion: number;
+
   // --- feedback ------------------------------------------------------------
   notices: Notice[];
 
@@ -181,6 +214,14 @@ export interface AppState {
   addIncomingRequest: (request: IncomingRequestPayload) => void;
   removeIncomingRequest: (requestId: string) => void;
   setOutgoingRequest: (request: OutgoingRequest | null) => void;
+
+  setIncomingFriendRequest: (request: FriendRequestState | null) => void;
+  setOutgoingFriendRequest: (request: FriendRequestState | null) => void;
+  clearFriendRequest: (requestId: string) => void;
+  setFriendRequestOutcome: (outcome: FriendRequestStatus | null) => void;
+  setFriendsInChat: (friends: boolean) => void;
+  bumpFriendsVersion: () => void;
+  resetFriendRequests: () => void;
 
   notify: (tone: Notice['tone'], text: string) => void;
   dismissNotice: (id: string) => void;
@@ -226,6 +267,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   incomingRequests: [],
   outgoingRequest: null,
+
+  incomingFriendRequest: null,
+  outgoingFriendRequest: null,
+  friendRequestOutcome: null,
+  friendsInChat: false,
+  friendsVersion: 0,
 
   notices: [],
 
@@ -306,20 +353,39 @@ export const useAppStore = create<AppState>((set) => ({
         relaxedCriteria: [],
         incomingRequests: [],
         outgoingRequest: null,
+        incomingFriendRequest: null,
+        outgoingFriendRequest: null,
+        friendRequestOutcome: null,
+        friendsInChat: false,
       };
     }),
 
   restoreChat: (chat, messages) =>
-    set({
-      phase: 'chatting',
-      chat,
-      messages,
-      peerAway: false,
-      searchingSince: null,
-      endedChat: null,
-      searchCriteria: null,
-      relaxAfterMs: null,
-      relaxedCriteria: [],
+    set((state) => {
+      // `session:ready` restores the friend request / friendship for the active chat, and
+      // `chat:resumed` follows immediately. Replacing an existing same-chat state would
+      // wipe that restoration; only a genuinely different chat starts from zero.
+      const keepFriendState = state.chat?.chatId === chat.chatId;
+
+      return {
+        phase: 'chatting' as const,
+        chat,
+        messages,
+        peerAway: false,
+        searchingSince: null,
+        endedChat: null,
+        searchCriteria: null,
+        relaxAfterMs: null,
+        relaxedCriteria: [],
+        ...(keepFriendState
+          ? {}
+          : {
+              incomingFriendRequest: null,
+              outgoingFriendRequest: null,
+              friendRequestOutcome: null,
+              friendsInChat: false,
+            }),
+      };
     }),
 
   clearConversation: () =>
@@ -335,6 +401,10 @@ export const useAppStore = create<AppState>((set) => ({
       relaxedCriteria: [],
       incomingRequests: [],
       outgoingRequest: null,
+      incomingFriendRequest: null,
+      outgoingFriendRequest: null,
+      friendRequestOutcome: null,
+      friendsInChat: false,
     }),
 
   queueOutgoingMessage: (text) => {
@@ -427,6 +497,10 @@ export const useAppStore = create<AppState>((set) => ({
         endedChat: { chatId, peerAlias: state.chat.peerAlias, reason },
         incomingRequests: [],
         outgoingRequest: null,
+        incomingFriendRequest: null,
+        outgoingFriendRequest: null,
+        friendRequestOutcome: null,
+        friendsInChat: false,
       };
     }),
 
@@ -450,6 +524,32 @@ export const useAppStore = create<AppState>((set) => ({
     })),
 
   setOutgoingRequest: (request) => set({ outgoingRequest: request }),
+
+  setIncomingFriendRequest: (request) => set({ incomingFriendRequest: request }),
+
+  setOutgoingFriendRequest: (request) => set({ outgoingFriendRequest: request }),
+
+  clearFriendRequest: (requestId) =>
+    set((state) => ({
+      incomingFriendRequest:
+        state.incomingFriendRequest?.requestId === requestId ? null : state.incomingFriendRequest,
+      outgoingFriendRequest:
+        state.outgoingFriendRequest?.requestId === requestId ? null : state.outgoingFriendRequest,
+    })),
+
+  setFriendRequestOutcome: (outcome) => set({ friendRequestOutcome: outcome }),
+
+  setFriendsInChat: (friends) => set({ friendsInChat: friends }),
+
+  bumpFriendsVersion: () => set((state) => ({ friendsVersion: state.friendsVersion + 1 })),
+
+  resetFriendRequests: () =>
+    set({
+      incomingFriendRequest: null,
+      outgoingFriendRequest: null,
+      friendRequestOutcome: null,
+      friendsInChat: false,
+    }),
 
   notify: (tone, text) =>
     set((state) => {

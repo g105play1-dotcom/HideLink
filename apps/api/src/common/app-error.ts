@@ -78,6 +78,12 @@ function defaultMessage(code: ErrorCode): string {
       return 'The connection request was declined.';
     case ErrorCode.INCOMING_REQUESTS_DISABLED:
       return 'This user does not accept direct requests.';
+    case ErrorCode.ALREADY_FRIENDS:
+      return 'You are already friends with this person.';
+    case ErrorCode.FRIEND_REQUEST_NOT_FOUND:
+      return 'This friend request no longer exists.';
+    case ErrorCode.FRIEND_REQUEST_EXPIRED:
+      return 'This friend request has expired.';
     case ErrorCode.BLOCKED:
       return 'Communication with this user is not possible.';
     case ErrorCode.BLOCKING_DISABLED:
@@ -119,6 +125,8 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.REPORT_NOT_FOUND:
     case ErrorCode.REQUEST_NOT_FOUND:
     case ErrorCode.REQUEST_EXPIRED:
+    case ErrorCode.FRIEND_REQUEST_NOT_FOUND:
+    case ErrorCode.FRIEND_REQUEST_EXPIRED:
     case ErrorCode.ROUTE_NOT_FOUND:
       return 404;
     case ErrorCode.PAYLOAD_TOO_LARGE:
@@ -129,6 +137,7 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.USER_UNAVAILABLE:
     case ErrorCode.REQUEST_DECLINED:
     case ErrorCode.INCOMING_REQUESTS_DISABLED:
+    case ErrorCode.ALREADY_FRIENDS:
     case ErrorCode.BLOCKED:
     case ErrorCode.BLOCKING_DISABLED:
     case ErrorCode.SELF_TARGET_NOT_ALLOWED:

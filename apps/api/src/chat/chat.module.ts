@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { ArchiveModule } from '../archive/archive.module.js';
+import { FriendsModule } from '../friends/friends.module.js';
 import { ModerationModule } from '../moderation/moderation.module.js';
 import { ChatController } from './chat.controller.js';
 import { MatchingService } from './chat.matching.js';
@@ -20,7 +21,7 @@ import { ChatService } from './chat.service.js';
  * each message afterwards. The archive never calls back, so the dependency is acyclic.
  */
 @Module({
-  imports: [ModerationModule, ArchiveModule],
+  imports: [ModerationModule, ArchiveModule, FriendsModule],
   controllers: [ChatController],
   providers: [ChatRegistryService, MatchingService, ConnectionRequestService, ChatService],
   exports: [ChatService],

@@ -3,6 +3,7 @@ import {
   CONNECT_REQUEST_TTL_MS,
   DEFAULT_SEARCH_PREFERENCES,
   ErrorCode,
+  FRIEND_REQUEST_TTL_MS,
   activeFilterCount,
   mutuallyCompatible,
   relaxBySteps,
@@ -10,7 +11,7 @@ import {
   type ReportReason,
   type SearchPreferences,
 } from '@anonlink/shared';
-import type { SendRequestResult } from '@anonlink/protocol';
+import type { FriendRequestResult, SendRequestResult } from '@anonlink/protocol';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { ArchiveService } from '../archive/archive.service.js';
@@ -24,6 +25,8 @@ import { PlatformService } from '../platform/platform.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PresenceService } from '../presence/presence.service.js';
 import { AppEventBus, type ChatEndReasonSource } from '../events/app-events.js';
+import { FriendRequestService, type FriendRequest } from '../friends/friend-requests.js';
+import { FriendsService } from '../friends/friends.service.js';
 import { ChatRegistryService, type ChatRecord, type StoredMessage } from './chat.registry.js';
 import { MatchingService } from './chat.matching.js';
 import { ConnectionRequestService } from './chat.requests.js';
@@ -34,6 +37,19 @@ export interface ChatState {
   activeChat?: ChatRecord;
   /** Number of direct invitations waiting for this identity's answer. */
   pendingRequests: number;
+  /**
+   * A friend request pending in the active chat, from this identity's point of view.
+   *
+   * Replayed in `session:ready` so a reload does not hide a question the other side is
+   * still waiting to have answered.
+   */
+  pendingFriendRequest?: {
+    requestId: string;
+    chatId: string;
+    alias: string;
+    expiresAt: Date;
+    direction: 'incoming' | 'outgoing';
+  };
 }
 
 export interface JoinRandomResult {
@@ -87,6 +103,8 @@ export class ChatService implements OnApplicationShutdown {
     private readonly moderation: ModerationService,
     private readonly archive: ArchiveService,
     private readonly platform: PlatformService,
+    private readonly friends: FriendsService,
+    private readonly friendRequests: FriendRequestService,
     private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -426,6 +444,190 @@ export class ChatService implements OnApplicationShutdown {
     return { accepted: true };
   }
 
+  // ---------------------------------------------------------------------------
+  // Friends
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Asks the peer of the current chat to become friends.
+   *
+   * Only the two participants can ask, only while the chat is alive, and only once per
+   * chat: a declined or expired question closes it, so the button cannot be used to nag.
+   * A request from the other side is answered by this very call — pressing "add friend"
+   * when they already asked you is consent, not a second request.
+   *
+   * Nothing about either User ID is returned by the request itself. The IDs are disclosed
+   * only by the `friend.resolved` event after acceptance.
+   */
+  async requestFriend(userId: string, chatId: string): Promise<FriendRequestResult> {
+    const chat = this.requireActiveChat(userId, chatId);
+    const peerId = chat.peerOf(userId);
+
+    // A friendship is durable while a request is only a question. Checking first also
+    // catches the case where two tabs of the same person press the button at once.
+    if (await this.friends.areFriends(userId, peerId)) {
+      throw new AppError(ErrorCode.ALREADY_FRIENDS);
+    }
+
+    // The database lookup above yields to the event loop; the chat may have ended while
+    // it was in flight. Creating a request for an ended chat would be invisible to both.
+    if (!chat.isActive) throw new AppError(ErrorCode.CHAT_ENDED);
+
+    if (this.friendRequests.isClosed(chatId)) {
+      throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    const existing = this.friendRequests.byChat(chatId);
+    if (existing) {
+      // The maintenance sweep runs periodically, so a request can be past its deadline
+      // while still present here. Pressing "add friend" must not revive it: in particular,
+      // the auto-accept branch below would otherwise create a friendship from a request
+      // the addressee never answered in time.
+      if (existing.expiresAt <= Date.now()) {
+        this.friendRequests.take(existing.requestId);
+        this.friendRequests.markClosed(chatId);
+        this.bus.emit({ type: 'friend.resolved', request: existing, status: 'expired' });
+        throw new AppError(ErrorCode.FRIEND_REQUEST_EXPIRED);
+      }
+
+      if (existing.fromUserId === userId) {
+        return {
+          requestId: existing.requestId,
+          chatId,
+          expiresAt: new Date(existing.expiresAt).toISOString(),
+          accepted: false,
+        };
+      }
+
+      // The other side asked while this tab was still deciding: this click completes the
+      // mutual agreement instead of creating a second request in the same chat.
+      if (existing.toUserId !== userId) {
+        throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+      }
+      const accepted = await this.acceptFriendRequest(existing);
+      if (!accepted) throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+
+      return {
+        requestId: existing.requestId,
+        chatId,
+        expiresAt: new Date(existing.expiresAt).toISOString(),
+        accepted: true,
+      };
+    }
+
+    const outcome = this.friendRequests.create({
+      requestId: newRequestId(),
+      chatId,
+      fromUserId: userId,
+      toUserId: peerId,
+      fromAlias: chat.aliasFor(userId),
+      ttlMs: FRIEND_REQUEST_TTL_MS,
+    });
+
+    if (outcome.kind === 'existing') {
+      // No await exists between the lookup above and this call, so this is only a
+      // defensive path. Reporting it as the pending request is still the truthful answer.
+      return {
+        requestId: outcome.request.requestId,
+        chatId,
+        expiresAt: new Date(outcome.request.expiresAt).toISOString(),
+        accepted: false,
+      };
+    }
+
+    this.bus.emit({ type: 'friend.incoming', request: outcome.request });
+    return {
+      requestId: outcome.request.requestId,
+      chatId,
+      expiresAt: new Date(outcome.request.expiresAt).toISOString(),
+      accepted: false,
+    };
+  }
+
+  /** The addressee accepts or declines a friend request. */
+  async respondToFriendRequest(
+    userId: string,
+    requestId: string,
+    accept: boolean,
+  ): Promise<{ accepted: boolean }> {
+    const request = this.friendRequests.get(requestId);
+
+    // Only the addressee may answer. A wrong addressee learns nothing.
+    if (!request || request.toUserId !== userId) {
+      throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    if (request.expiresAt <= Date.now()) {
+      this.friendRequests.take(requestId);
+      this.friendRequests.markClosed(request.chatId);
+      this.bus.emit({ type: 'friend.resolved', request, status: 'expired' });
+      throw new AppError(ErrorCode.FRIEND_REQUEST_EXPIRED);
+    }
+
+    const chat = this.registry.get(request.chatId);
+    const chatIsUsable =
+      chat?.isActive === true &&
+      chat.hasParticipant(userId) &&
+      chat.hasParticipant(request.fromUserId);
+    if (!chatIsUsable) {
+      this.friendRequests.take(requestId);
+      this.friendRequests.markClosed(request.chatId);
+      this.bus.emit({ type: 'friend.resolved', request, status: 'cancelled' });
+      throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    if (!accept) {
+      this.friendRequests.take(requestId);
+      this.friendRequests.markClosed(request.chatId);
+      this.bus.emit({ type: 'friend.resolved', request, status: 'declined' });
+      return { accepted: false };
+    }
+
+    // A block can have been recorded outside this chat since the request was created.
+    if (await this.moderation.isBlockedBetween(userId, request.fromUserId)) {
+      this.friendRequests.take(requestId);
+      this.friendRequests.markClosed(request.chatId);
+      this.bus.emit({ type: 'friend.resolved', request, status: 'unavailable' });
+      return { accepted: false };
+    }
+
+    // Re-check after the asynchronous block lookup: the chat may have ended or the sweep
+    // may have expired the request while this call was waiting for the database.
+    if (!this.friendRequests.get(requestId)) {
+      throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    }
+
+    const accepted = await this.acceptFriendRequest(request);
+    if (!accepted) throw new AppError(ErrorCode.FRIEND_REQUEST_NOT_FOUND);
+    return { accepted: true };
+  }
+
+  /**
+   * Completes a mutual agreement.
+   *
+   * The request is taken synchronously *before* the database write, so a concurrent
+   * chat teardown cannot emit "cancelled" after the friendship has been created. If the
+   * write fails, the request is gone and the service reports an internal error; that is
+   * the honest outcome of a database failure, and both users can meet again in a new chat.
+   */
+  private async acceptFriendRequest(request: FriendRequest): Promise<boolean> {
+    if (!this.friendRequests.take(request.requestId)) return false;
+    this.friendRequests.markClosed(request.chatId);
+
+    const friendship = await this.friends.create(request.fromUserId, request.toUserId);
+    this.bus.emit({ type: 'friend.resolved', request, status: 'accepted', friendship });
+    return true;
+  }
+
+  /** Cancels a pending friend request because its chat is over. */
+  private cancelFriendRequestsForChat(chatId: string): void {
+    const request = this.friendRequests.takeByChat(chatId);
+    if (request) {
+      this.bus.emit({ type: 'friend.resolved', request, status: 'cancelled' });
+    }
+    this.friendRequests.forgetChat(chatId);
+  }
+
   /** Cancels every invitation this identity has sent, telling the addressees. */
   cancelOutgoingRequests(userId: string): void {
     for (const request of this.requests.takeBySender(userId)) {
@@ -601,15 +803,35 @@ export class ChatService implements OnApplicationShutdown {
     this.startGrace(chat, userId);
   }
 
+  /** Whether the caller and the other participant of their active chat are friends. */
+  async areChatPeersFriends(userId: string): Promise<boolean> {
+    const chat = this.registry.activeFor(userId);
+    return chat ? this.friends.areFriends(userId, chat.peerOf(userId)) : false;
+  }
+
   /** Current state of an identity, used to answer `session:ready` after a reconnect. */
   stateFor(userId: string): ChatState {
+    const activeChat = this.registry.activeFor(userId);
+    const friendRequest = activeChat ? this.friendRequests.byChat(activeChat.chatId) : undefined;
+
     return {
       queued: this.matching.isQueued(userId),
       ...(this.matching.queuedSince(userId)
         ? { queuedSince: this.matching.queuedSince(userId) }
         : {}),
-      ...(this.registry.activeFor(userId) ? { activeChat: this.registry.activeFor(userId) } : {}),
+      ...(activeChat ? { activeChat } : {}),
       pendingRequests: this.requests.pendingCountFor(userId),
+      ...(activeChat && friendRequest && friendRequest.expiresAt > Date.now()
+        ? {
+            pendingFriendRequest: {
+              requestId: friendRequest.requestId,
+              chatId: friendRequest.chatId,
+              alias: activeChat.aliasFor(activeChat.peerOf(userId)),
+              expiresAt: new Date(friendRequest.expiresAt),
+              direction: friendRequest.toUserId === userId ? 'incoming' : 'outgoing',
+            },
+          }
+        : {}),
     };
   }
 
@@ -621,6 +843,7 @@ export class ChatService implements OnApplicationShutdown {
   sweep(now: number = Date.now()): {
     expiredTickets: number;
     expiredRequests: number;
+    expiredFriendRequests: number;
     prunedChats: number;
   } {
     const expiredTickets = this.matching.sweep(now);
@@ -638,9 +861,15 @@ export class ChatService implements OnApplicationShutdown {
       });
     }
 
+    const expiredFriendRequests = this.friendRequests.sweep(now);
+    for (const request of expiredFriendRequests) {
+      this.bus.emit({ type: 'friend.resolved', request, status: 'expired' });
+    }
+
     return {
       expiredTickets: expiredTickets.length,
       expiredRequests: expiredRequests.length,
+      expiredFriendRequests: expiredFriendRequests.length,
       prunedChats: this.registry.sweep(now),
     };
   }
@@ -677,6 +906,7 @@ export class ChatService implements OnApplicationShutdown {
       ...this.registry.stats(),
       ...this.presence.stats(),
       pendingRequests: this.requests.stats().pending,
+      friendRequests: this.friendRequests.stats(),
       graceTimers: this.graceTimers.size,
       pendingWrites: this.pendingWrites.size,
     };
@@ -690,6 +920,15 @@ export class ChatService implements OnApplicationShutdown {
     const facts = this.directory.get(userId);
     if (!facts) throw new AppError(ErrorCode.IDENTITY_NOT_FOUND);
     return facts;
+  }
+
+  /** Resolves a chat the caller is an active participant of, or throws the precise reason. */
+  private requireActiveChat(userId: string, chatId: string): ChatRecord {
+    const chat = this.registry.get(chatId);
+    if (!chat) throw new AppError(ErrorCode.CHAT_NOT_FOUND);
+    if (!chat.hasParticipant(userId)) throw new AppError(ErrorCode.NOT_A_PARTICIPANT);
+    if (!chat.isActive) throw new AppError(ErrorCode.CHAT_ENDED);
+    return chat;
   }
 
   /**
@@ -869,6 +1108,7 @@ export class ChatService implements OnApplicationShutdown {
   private endChat(chat: ChatRecord, reason: ChatEndReasonSource, endedBy?: string): void {
     if (!chat.isActive) return;
 
+    this.cancelFriendRequestsForChat(chat.chatId);
     this.registry.end(chat, reason, new Date(), endedBy);
     this.cancelGraceTimersFor(chat.chatId);
 

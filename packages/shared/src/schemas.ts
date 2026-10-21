@@ -102,6 +102,17 @@ export const connectRespondSchema = z
   })
   .strict();
 
+/** WebSocket: `friend:request` — ask the current chat peer to become a friend. */
+export const friendRequestSchema = z.object({ chatId: chatIdSchema }).strict();
+
+/** WebSocket: `friend:respond` */
+export const friendRespondSchema = z
+  .object({
+    requestId: z.uuid(),
+    accept: z.boolean(),
+  })
+  .strict();
+
 /** REST + WebSocket: report a message or a peer. */
 export const reportSchema = z
   .object({
@@ -139,6 +150,8 @@ export type PublicId = z.infer<typeof publicIdSchema>;
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>;
 export type ConnectRequestInput = z.infer<typeof connectRequestSchema>;
 export type ConnectRespondInput = z.infer<typeof connectRespondSchema>;
+export type FriendRequestInput = z.infer<typeof friendRequestSchema>;
+export type FriendRespondInput = z.infer<typeof friendRespondSchema>;
 export type ReportInput = z.infer<typeof reportSchema>;
 export type SettingsInput = SettingsUpdate;
 

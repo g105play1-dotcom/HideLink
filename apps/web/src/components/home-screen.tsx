@@ -9,7 +9,9 @@ import { ChatPanel } from '@/components/chat-panel';
 import { ConnectionBadge } from '@/components/connection-badge';
 import { ContactOwnerDialog } from '@/components/contact-owner-dialog';
 import { DirectSearch } from '@/components/direct-search';
+import { FriendsPanel } from '@/components/friends-panel';
 import { IdentityStrip } from '@/components/identity-strip';
+import { IncomingFriendRequestDialog } from '@/components/incoming-friend-request-dialog';
 import { IncomingRequestDialog } from '@/components/incoming-request-dialog';
 import { LanguageToggle } from '@/components/language-toggle';
 import { ReportDialog } from '@/components/report-dialog';
@@ -124,6 +126,7 @@ export function HomeScreen() {
                 be a control that cannot be used.
               */}
               {phase === 'idle' ? <DirectSearch /> : null}
+              {phase === 'idle' ? <FriendsPanel /> : null}
 
               {inChat && chat ? (
                 <ChatPanel
@@ -164,6 +167,7 @@ export function HomeScreen() {
       <AdRail side="right" />
 
       <IncomingRequestDialog />
+      <IncomingFriendRequestDialog />
       <ReportDialog open={reporting} onClose={() => setReporting(false)} />
       <BlockDialog open={blocking} onClose={() => setBlocking(false)} />
       <ContactOwnerDialog open={contacting} onClose={() => setContacting(false)} />
