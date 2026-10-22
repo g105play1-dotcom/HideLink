@@ -255,6 +255,16 @@ export interface FriendRemovedPayload {
   publicId: string;
 }
 
+/**
+ * A report named the recipient.
+ *
+ * Only the time is sent. The reporter, the chat, the reason and the message snapshot are
+ * the owner's evidence and are never disclosed to the target.
+ */
+export interface ReportWarningPayload {
+  reportedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // Client -> server acknowledgement data
 // ---------------------------------------------------------------------------
@@ -368,6 +378,7 @@ export interface ServerToClientEvents {
   'friend:incoming': (payload: IncomingFriendPayload) => void;
   'friend:resolved': (payload: FriendResolvedPayload) => void;
   'friend:removed': (payload: FriendRemovedPayload) => void;
+  'report:warning': (payload: ReportWarningPayload) => void;
   'app:error': (payload: ErrorPayload) => void;
 }
 

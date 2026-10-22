@@ -468,8 +468,10 @@ class AnonymousClient {
       const store = useAppStore.getState();
       store.clearConversation();
       // The old identity's friendships were deleted silently, so the list must not keep
-      // showing contacts that no longer belong to this User ID.
+      // showing contacts that no longer belong to this User ID. The same applies to a
+      // report warning: it belonged to the identity that was just replaced.
       store.bumpFriendsVersion();
+      store.bumpReportWarningVersion();
     });
 
     socket.on('match:queued', (payload) => {
@@ -623,6 +625,14 @@ class AnonymousClient {
       const store = useAppStore.getState();
       store.bumpFriendsVersion();
       store.notify('info', activeT('Контакт удалён из списка друзей.'));
+    });
+
+    socket.on('report:warning', () => {
+      const store = useAppStore.getState();
+      // The event carries no evidence, only the fact of a complaint. The dialog fetches
+      // the durable warning from REST, so a missed event is recovered on the next load.
+      store.bumpReportWarningVersion();
+      store.notify('error', activeT('На вас поступила жалоба.'));
     });
 
     socket.on('app:error', (payload) => this.onServerError(payload));

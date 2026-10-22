@@ -1,7 +1,13 @@
-import { ErrorCode } from '@anonlink/shared';
+import { ErrorCode, type AdminPlatformView } from '@anonlink/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { adminHttp, createIdentity, http, setBlockingPolicy } from './support/api-client.js';
+import {
+  adminHttp,
+  createIdentity,
+  http,
+  setBlockingPolicy,
+  setPlatformPolicy,
+} from './support/api-client.js';
 
 /**
  * The platform switches the owner controls in `/admin`.
@@ -26,6 +32,8 @@ afterEach(async () => {
 
 interface PlatformBody {
   blockingEnabled: boolean;
+  aiAutonomyEnabled: boolean;
+  aiCompanionEnabled: boolean;
 }
 
 interface ErrorBody {
@@ -116,16 +124,57 @@ describe('blocking policy', () => {
   it('rejects a body that is not exactly the switches it controls', async () => {
     const malformed = await adminHttp<ErrorBody>('/admin/platform', {
       method: 'PUT',
-      body: { blockingEnabled: 'yes' },
+      body: { blockingEnabled: 'yes', aiAutonomyEnabled: false, aiCompanionEnabled: false },
     });
     expect(malformed.status).toBe(400);
     expect(malformed.body.error.code).toBe(ErrorCode.INVALID_INPUT);
 
+    const partial = await adminHttp<ErrorBody>('/admin/platform', {
+      method: 'PUT',
+      body: { blockingEnabled: true },
+    });
+    expect(partial.status).toBe(400);
+    expect(partial.body.error.code).toBe(ErrorCode.INVALID_INPUT);
+
     const extra = await adminHttp<ErrorBody>('/admin/platform', {
       method: 'PUT',
-      body: { blockingEnabled: true, reportsVisible: true },
+      body: {
+        blockingEnabled: true,
+        aiAutonomyEnabled: false,
+        aiCompanionEnabled: false,
+        reportsVisible: true,
+      },
     });
     expect(extra.status).toBe(400);
     expect(extra.body.error.code).toBe(ErrorCode.INVALID_INPUT);
+  });
+
+  it('stores both AI permissions independently of the blocking switch', async () => {
+    const before = await adminHttp<PlatformBody>('/admin/platform');
+    expect(before.status).toBe(200);
+
+    try {
+      const saved = await adminHttp<AdminPlatformView>('/admin/platform', {
+        method: 'PUT',
+        body: {
+          blockingEnabled: true,
+          aiAutonomyEnabled: true,
+          aiCompanionEnabled: true,
+        },
+      });
+      expect(saved.status).toBe(200);
+      expect(saved.body).toEqual({
+        blockingEnabled: true,
+        aiAutonomyEnabled: true,
+        aiCompanionEnabled: true,
+      });
+
+      // A different process state is not involved, so re-reading is enough to prove the
+      // values reached PostgreSQL and the cache was replaced from that write.
+      const reloaded = await adminHttp<PlatformBody>('/admin/platform');
+      expect(reloaded.body).toEqual(saved.body);
+    } finally {
+      await setPlatformPolicy(before.body);
+    }
   });
 });

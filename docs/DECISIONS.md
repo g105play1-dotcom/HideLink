@@ -984,7 +984,11 @@ is security theatre); per-moderator keys without accounts (more secrets to rotat
 
 ---
 
-## D37. Neural networks are optional adapters: a human-confirmed moderation assistant first, a labelled companion later
+## D37. Neural networks are optional adapters: a human-confirmed moderation assistant first, a companion later (superseded by D38)
+
+**Status (2026-10-22).** The moderation-assistant half still stands. The companion half is superseded by
+D38: the owner wants a *hidden* fallback after a failed random search, gated by an off-by-default owner
+switch. The text below is kept as the original record, including the reasoning that was rejected later.
 
 **Context.** The owner asked whether AI can act as a moderator and as an interlocutor. Both are feasible,
 but they are different products with different consent and privacy consequences. The chat domain currently
@@ -1023,3 +1027,77 @@ moderation bypass); sending whole archives or User IDs to a provider (unnecessar
 retention surface); putting an OpenAI/VK/Telegram SDK in the chat domain (provider lock-in and an
 untestable domain); building the integration now without credentials or a data-processing decision (an
 unverifiable claim, not a feature).
+
+---
+
+## D38. The reported person is warned, and both AI permissions are off-by-default owner switches
+
+**Context.** On 2026-10-22 the owner asked for three things that D37 did not cover: a person named in an
+abuse report must be told that a ban is possible; an owner switch must decide whether AI may act
+autonomously, especially whether it may ban; and if random matching finds nobody, an AI companion should
+take the place of a human **without saying that it is an AI**. This last point reverses D37's
+"opt-in and clearly labelled companion". The owner also said the companion must see all the search
+criteria a user set (gender, age, city, and the rest) so that its persona fits them.
+
+**Decision.**
+
+1. **The report warning is target-only and evidence-free.** `ModerationService.createReport` writes
+   `Identity.reportWarningAt` in the same transaction as the report. The target receives a
+   `report:warning` event and a durable `GET /api/v1/me/report-warning`; acknowledging it with
+   `POST /api/v1/me/report-warning/read` clears the column. The warning says only that a complaint
+   exists, that it will be reviewed and that access may be closed — up to a ban. It does not name the
+   reporter, the chat, the reason or the message, and it does not reveal whether the report will lead to
+   action. A new report overwrites an unread warning; the report row remains the owner's evidence.
+2. **The chat-end reason stays asymmetric.** The reporter is told `reported`; the target sees
+   `peer_left`, exactly as before. The warning is a separate, deliberate notification, not a change to
+   the end reason. This means a target can infer that the peer probably filed the report, because the
+   report form is the only path; it cannot learn anything else from it.
+3. **Both AI permissions live in `PlatformPolicy`, default `false`.** `aiAutonomyEnabled` permits an AI
+   moderator to act without a human click (including a ban). `aiCompanionEnabled` permits an AI
+   companion to stand in after a failed random search. `/admin` shows both switches; `PUT
+   /admin/platform` replaces all three booleans and the schema is strict. A future consumer reads
+   `PlatformService.aiAutonomyEnabled()` / `aiCompanionEnabled()` on the server; a prompt, a client
+   field or an adapter's own configuration may never grant the permission.
+4. **The companion is a fallback, never a competitor.** Normal matching runs first. The companion may be
+   offered only when the server has no eligible human for that search after the configured wait; it must
+   never take a ticket ahead of a real candidate or be inserted into the queue as a fake ticket. The
+   exact wait and whether relaxation must run first are configuration decisions to be made with the
+   adapter, not implemented now. Until a provider exists, the switch is stored but nothing reads it.
+5. **The companion receives the search criteria.** The adapter payload includes the `SearchPreferences`
+   actually in force — genders, age range, countries/regions/cities, languages, `relaxAllowed` and the
+   current relaxation step — so its persona can satisfy the filters instead of being a random stranger.
+   It may also receive the interface language needed to converse. It must **not** receive the searcher's
+   User ID, session token, blocks, friendships, reports, archive content or IP/user-agent hashes. If the
+   persona cannot satisfy the active criteria, the fallback fails closed: no chat is created.
+6. **The companion is hidden by product decision.** It is presented as an ordinary random peer, with a
+   per-chat alias and `from: 'peer'` messages, and the interface does not label it as an AI. The server
+   must still be able to distinguish it internally for moderation, retention and abuse handling; that
+   marker is server-only and must never appear in `ChatView`, the protocol or the DOM. The companion
+   output goes through the same `ChatService` checks, length limits and rate limits as a human message
+   and cannot call block, report, friend, ban or matching operations itself.
+7. **Autonomous moderation is not built.** The switch exists so the owner can make the policy decision
+   before the adapter does. D37's moderation assistant remains read-only and human-confirmed. If an
+   autonomous action is added later, it must re-read the server switch at the moment of acting, write an
+   audit record identifying the actor as `ai` (the audit table does not exist yet), and keep a human
+   appeal path. The switch alone is not an implementation and is not described to users as one.
+
+**Consequences.** A reported person now gets a visible warning even if they were offline when the report
+was filed; the dialog cannot be dismissed without acknowledging it, and a reload reads the durable
+timestamp. The warning deliberately gives up some of the old "reports are invisible to the target"
+property: the target learns that a complaint exists and can guess the reporter was the peer. The two AI
+switches survive a restart and are visible only to the owner, but no AI request leaves the process: no
+provider, credentials, data-processing terms or budget have been chosen. A hidden companion has a
+product risk D37 named and this decision accepts — a model may break character, and the service cannot
+honestly promise otherwise. The companion also needs its own retention and disclosure decisions before
+it can be enabled, even though the interface stays silent.
+
+**Rejected.** A silent report (the owner asked for a warning with a possible-ban consequence); putting
+the reporter, reason or snapshot in the warning (retaliation and evidence leakage); a separate notice
+table (one timestamp and the report row are enough); a target-only chat-end reason (it would tell the
+reporter and the target different stories about the same chat); letting the browser decide whether AI may
+act (decoration, not enforcement); an AI in the normal queue presented as a human *in place of* real
+candidates (it would starve humans and make "random conversation" meaningless); a companion that ignores
+the filters (it would be the one match that violates the user's own criteria); sending User IDs,
+friendships, reports or archives to a provider (unnecessary disclosure); enabling autonomy or the
+companion by default (the owner must opt in explicitly); building a provider integration now without
+credentials, a data-processing decision and a cost cap (an unverifiable feature, not a seam).

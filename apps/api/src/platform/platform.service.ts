@@ -13,8 +13,10 @@ const POLICY_ID = 'default';
  *
  * Since 2026-10-20 (D31) the availability of blocking is a moderation decision, not a
  * personal preference: the owner sets it once, every user gets the same answer, and the
- * API enforces it. Keeping the value in `PlatformPolicy` means it survives a restart and
- * is visible in the same place as the archive and the reports.
+ * API enforces it. The same row now carries the two AI permissions (D38): whether an AI
+ * moderator may act without a click, and whether an AI companion may stand in for a missing
+ * human. Both are off until the owner enables them, and both will be enforced server-side
+ * by the adapter that consumes them — never by a model's own claim.
  *
  * ## Why it is cached
  *
@@ -25,18 +27,27 @@ const POLICY_ID = 'default';
  *
  * ## Fail closed
  *
- * A missing row, or a read that never happened, means `false`: the shipped default is
- * "blocking is off". A database hiccup must not silently grant a moderation action.
+ * A missing row, or a read that never happened, means `false` for every switch: the
+ * shipped default is "blocking off, AI permissions off". A database hiccup must not
+ * silently grant a moderation action or an AI permission.
  */
 @Injectable()
 export class PlatformService implements OnModuleInit {
-  private policy: AdminPlatformView = { blockingEnabled: false };
+  private policy: AdminPlatformView = {
+    blockingEnabled: false,
+    aiAutonomyEnabled: false,
+    aiCompanionEnabled: false,
+  };
 
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit(): Promise<void> {
     await this.reload();
-    log.info('platform.policy_loaded', { blockingEnabled: this.policy.blockingEnabled });
+    log.info('platform.policy_loaded', {
+      blockingEnabled: this.policy.blockingEnabled,
+      aiAutonomyEnabled: this.policy.aiAutonomyEnabled,
+      aiCompanionEnabled: this.policy.aiCompanionEnabled,
+    });
   }
 
   /** The policy currently in force. Synchronous on purpose; see the class comment. */
@@ -49,25 +60,70 @@ export class PlatformService implements OnModuleInit {
     return this.policy.blockingEnabled;
   }
 
+  /**
+   * Whether an AI moderator may act without a human click.
+   *
+   * Exposed as a server-side getter so a future adapter cannot decide this from its own
+   * configuration. No AI consumer exists yet; the value is stored and enforced by whichever
+   * action path is added (D38).
+   */
+  aiAutonomyEnabled(): boolean {
+    return this.policy.aiAutonomyEnabled;
+  }
+
+  /** Whether an AI companion may stand in when random matching finds no human. */
+  aiCompanionEnabled(): boolean {
+    return this.policy.aiCompanionEnabled;
+  }
+
   async reload(): Promise<void> {
     const row = await this.prisma.platformPolicy.findUnique({
       where: { id: POLICY_ID },
-      select: { blockingEnabled: true },
+      select: {
+        blockingEnabled: true,
+        aiAutonomyEnabled: true,
+        aiCompanionEnabled: true,
+      },
     });
 
-    this.policy = { blockingEnabled: row?.blockingEnabled ?? false };
+    this.policy = {
+      blockingEnabled: row?.blockingEnabled ?? false,
+      aiAutonomyEnabled: row?.aiAutonomyEnabled ?? false,
+      aiCompanionEnabled: row?.aiCompanionEnabled ?? false,
+    };
   }
 
   async set(input: AdminPlatformView): Promise<AdminPlatformView> {
     const row = await this.prisma.platformPolicy.upsert({
       where: { id: POLICY_ID },
-      create: { id: POLICY_ID, blockingEnabled: input.blockingEnabled },
-      update: { blockingEnabled: input.blockingEnabled },
-      select: { blockingEnabled: true },
+      create: {
+        id: POLICY_ID,
+        blockingEnabled: input.blockingEnabled,
+        aiAutonomyEnabled: input.aiAutonomyEnabled,
+        aiCompanionEnabled: input.aiCompanionEnabled,
+      },
+      update: {
+        blockingEnabled: input.blockingEnabled,
+        aiAutonomyEnabled: input.aiAutonomyEnabled,
+        aiCompanionEnabled: input.aiCompanionEnabled,
+      },
+      select: {
+        blockingEnabled: true,
+        aiAutonomyEnabled: true,
+        aiCompanionEnabled: true,
+      },
     });
 
-    this.policy = { blockingEnabled: row.blockingEnabled };
-    log.info('platform.policy_changed', { blockingEnabled: row.blockingEnabled });
+    this.policy = {
+      blockingEnabled: row.blockingEnabled,
+      aiAutonomyEnabled: row.aiAutonomyEnabled,
+      aiCompanionEnabled: row.aiCompanionEnabled,
+    };
+    log.info('platform.policy_changed', {
+      blockingEnabled: row.blockingEnabled,
+      aiAutonomyEnabled: row.aiAutonomyEnabled,
+      aiCompanionEnabled: row.aiCompanionEnabled,
+    });
     return this.policy;
   }
 }

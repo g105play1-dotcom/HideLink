@@ -16,6 +16,7 @@ import { IncomingFriendRequestDialog } from '@/components/incoming-friend-reques
 import { IncomingRequestDialog } from '@/components/incoming-request-dialog';
 import { LanguageToggle } from '@/components/language-toggle';
 import { ReportDialog } from '@/components/report-dialog';
+import { ReportWarningDialog } from '@/components/report-warning-dialog';
 import { SearchPanel } from '@/components/search-panel';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Toaster } from '@/components/toaster';
@@ -181,6 +182,7 @@ export function HomeScreen() {
 
       <IncomingRequestDialog />
       <IncomingFriendRequestDialog />
+      <ReportWarningDialog />
       <ReportDialog open={reporting} onClose={() => setReporting(false)} />
       <BlockDialog open={blocking} onClose={() => setBlocking(false)} />
       <ContactOwnerDialog open={contacting} onClose={() => setContacting(false)} />

@@ -181,6 +181,8 @@ export interface AppState {
   friendsInChat: boolean;
   /** Bumped when the friend list changes elsewhere, so a mounted list refetches. */
   friendsVersion: number;
+  /** Bumped when a report warning arrives, so the dialog refetches it from REST. */
+  reportWarningVersion: number;
 
   // --- feedback ------------------------------------------------------------
   notices: Notice[];
@@ -221,6 +223,7 @@ export interface AppState {
   setFriendRequestOutcome: (outcome: FriendRequestStatus | null) => void;
   setFriendsInChat: (friends: boolean) => void;
   bumpFriendsVersion: () => void;
+  bumpReportWarningVersion: () => void;
   resetFriendRequests: () => void;
 
   notify: (tone: Notice['tone'], text: string) => void;
@@ -273,6 +276,7 @@ export const useAppStore = create<AppState>((set) => ({
   friendRequestOutcome: null,
   friendsInChat: false,
   friendsVersion: 0,
+  reportWarningVersion: 0,
 
   notices: [],
 
@@ -542,6 +546,9 @@ export const useAppStore = create<AppState>((set) => ({
   setFriendsInChat: (friends) => set({ friendsInChat: friends }),
 
   bumpFriendsVersion: () => set((state) => ({ friendsVersion: state.friendsVersion + 1 })),
+
+  bumpReportWarningVersion: () =>
+    set((state) => ({ reportWarningVersion: state.reportWarningVersion + 1 })),
 
   resetFriendRequests: () =>
     set({

@@ -57,6 +57,7 @@ const serverEventsSatisfyInterface = {
   [ServerEvent.FriendIncoming]: ServerEvent.FriendIncoming,
   [ServerEvent.FriendResolved]: ServerEvent.FriendResolved,
   [ServerEvent.FriendRemoved]: ServerEvent.FriendRemoved,
+  [ServerEvent.ReportWarning]: ServerEvent.ReportWarning,
   [ServerEvent.Error]: ServerEvent.Error,
 } satisfies Record<ServerEventName, keyof ServerToClientEvents>;
 
@@ -103,6 +104,7 @@ describe('event names', () => {
       'match:queued',
       'match:relaxed',
       'peer:blocked',
+      'report:warning',
       'request:incoming',
       'request:resolved',
       'session:ready',

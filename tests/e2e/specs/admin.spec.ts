@@ -6,6 +6,7 @@ import {
   openOwnerPage,
   resetArchive,
   savePolicy,
+  setPlatformPolicy,
   setStorageSwitch,
   signIn,
 } from '../support/owner';
@@ -67,6 +68,48 @@ test.describe('the owner archive page', () => {
     await expect(owner.page.getByRole('heading', { name: 'Ключ владельца' })).toHaveCount(0);
 
     await owner.context.close();
+  });
+
+  test('stores the AI permissions across a reload and keeps them independent', async ({
+    browser,
+  }) => {
+    const owner = await openOwnerPage(browser);
+
+    try {
+      await signIn(owner.page);
+
+      const autonomy = owner.page.getByRole('checkbox', {
+        name: 'Разрешить ИИ самостоятельные действия',
+      });
+      const companion = owner.page.getByRole('checkbox', {
+        name: 'Разрешить ИИ-собеседника, если человек не найден',
+      });
+
+      await expect(autonomy).not.toBeChecked();
+      await expect(companion).not.toBeChecked();
+
+      // The checkbox reflects the server-confirmed policy, not local React state, so the
+      // click starts a PUT and the box becomes checked after the query refetches. `check()`
+      // would insist the state changed synchronously and fail; `click()` plus the assertion
+      // is the honest expression of the contract.
+      await autonomy.click();
+      await expect(autonomy).toBeChecked();
+      await expect(autonomy).toBeEnabled();
+
+      await companion.click();
+      await expect(companion).toBeChecked();
+      await expect(companion).toBeEnabled();
+
+      // The values are stored, not just held in React state: a reload has to read them
+      // back from the server. They are independent switches, so both stay on.
+      await owner.page.reload();
+      await expect(owner.page.getByRole('heading', { name: 'Что сохранять' })).toBeVisible();
+      await expect(autonomy).toBeChecked();
+      await expect(companion).toBeChecked();
+    } finally {
+      await setPlatformPolicy({ aiAutonomyEnabled: false, aiCompanionEnabled: false });
+      await owner.context.close();
+    }
   });
 
   test('records a conversation the policy covers, and reads it back', async ({ browser }) => {

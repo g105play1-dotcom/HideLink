@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { ChatView } from '@anonlink/protocol';
-import { ErrorCode, type AdminReportView } from '@anonlink/shared';
+import { ErrorCode, type AdminReportView, type ReportWarningResponse } from '@anonlink/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -18,9 +18,9 @@ import {
  * Blocking and reporting, over real WebSockets.
  *
  * Two things matter here beyond "the button works": a block must take effect
- * immediately for matchmaking (not only for the next database read), and neither
- * action may tell the other side what happened — a block that can be *felt* is a way
- * to send a message to someone who does not want to hear from you.
+ * immediately for matchmaking (not only for the next database read), and the report
+ * warning must reach the reported person without revealing the reporter, the chat or
+ * the evidence (D38).
  */
 
 interface ChatStarted {
@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe('reporting', () => {
-  it('ends the chat for both sides and reports asymmetrically', async () => {
+  it('ends the chat asymmetrically and warns the reported side', async () => {
     const a = await client();
     const b = await client();
     const { chatId } = await matchPair(a, b);
@@ -53,6 +53,7 @@ describe('reporting', () => {
 
     const aEnded = a.waitFor<{ reason: string }>('chat:ended');
     const bEnded = b.waitFor<{ reason: string }>('chat:ended');
+    const bWarning = b.waitFor<{ reportedAt: string }>('report:warning');
 
     const reported = await a.emit<{ reportId: string }>('report:send', {
       chatId,
@@ -64,9 +65,42 @@ describe('reporting', () => {
     expect(reported.ok).toBe(true);
     expect(reported.ok && reported.data.reportId).toBeTruthy();
 
-    // The reporter is told what they did; the other side is told the peer left.
+    // The reporter is told what they did; the other side is told the peer left, and gets
+    // a warning that a complaint exists. The warning names nobody and carries no evidence.
     await expect(aEnded).resolves.toMatchObject({ reason: 'reported' });
     await expect(bEnded).resolves.toMatchObject({ reason: 'peer_left' });
+    const warning = await bWarning;
+    expect(Number.isNaN(Date.parse(warning.reportedAt))).toBe(false);
+
+    // The reporter must not see the warning on their own screen.
+    await a.expectNoEvent('report:warning', 300);
+
+    const stored = await http<ReportWarningResponse>('/me/report-warning', {
+      cookie: b.identity.cookie,
+    });
+    expect(stored.status).toBe(200);
+    expect(stored.body.warning).not.toBeNull();
+    expect(stored.body.warning?.reportedAt).toBe(warning.reportedAt);
+
+    const acknowledged = await http<{ cleared: boolean }>('/me/report-warning/read', {
+      method: 'POST',
+      cookie: b.identity.cookie,
+    });
+    expect(acknowledged.status).toBe(201);
+    expect(acknowledged.body.cleared).toBe(true);
+
+    const cleared = await http<ReportWarningResponse>('/me/report-warning', {
+      cookie: b.identity.cookie,
+    });
+    expect(cleared.body.warning).toBeNull();
+
+    // Acknowledging nothing is idempotent, not a failure.
+    const again = await http<{ cleared: boolean }>('/me/report-warning/read', {
+      method: 'POST',
+      cookie: b.identity.cookie,
+    });
+    expect(again.status).toBe(201);
+    expect(again.body.cleared).toBe(false);
   });
 
   it('refuses a report about a chat the caller is not in', async () => {

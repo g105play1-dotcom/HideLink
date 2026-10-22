@@ -72,6 +72,21 @@ export interface UserLookupView {
   acceptsRequests: boolean;
 }
 
+/**
+ * The warning shown to a person a report named.
+ *
+ * Deliberately carries only the time: the reporter, the chat, the reason and the text are
+ * moderation evidence and must not be disclosed to the target. A single warning is kept;
+ * a new report replaces it.
+ */
+export interface ReportWarningView {
+  reportedAt: string;
+}
+
+export interface ReportWarningResponse {
+  warning: ReportWarningView | null;
+}
+
 /** One entry in the caller's own block list. */
 export interface BlockedUserView {
   publicId: string;
@@ -212,6 +227,10 @@ export interface OwnerMessageCreatedResponse {
 export interface AdminPlatformView {
   /** Whether the "block a peer" action exists for anybody at all. Off by default. */
   blockingEnabled: boolean;
+  /** Whether an AI moderator may act without a human click. Off by default. */
+  aiAutonomyEnabled: boolean;
+  /** Whether an AI companion may stand in when no human is found. Off by default. */
+  aiCompanionEnabled: boolean;
 }
 
 /** One abuse report as the owner sees it. */

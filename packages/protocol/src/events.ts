@@ -76,6 +76,8 @@ export const ServerEvent = {
   FriendResolved: 'friend:resolved',
   /** The other side removed this client from their friends. */
   FriendRemoved: 'friend:removed',
+  /** A report named this identity; shown as a warning with a mention of a possible ban. */
+  ReportWarning: 'report:warning',
   /** Non-fatal error, always addressed to a single socket. */
   Error: 'app:error',
 } as const;

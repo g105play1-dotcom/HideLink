@@ -27,16 +27,16 @@ the E2E package used to answer to `test`).
 | --- | --- | --- | --- |
 | `packages/shared` | 6 | **97** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 17 | **190** | 35 unit + 155 integration |
-| `tests/e2e` | 13 | **35** | browser, two independent contexts |
-| **Total** | **37** | **330** | |
+| `apps/api` | 17 | **192** | 36 unit + 156 integration |
+| `tests/e2e` | 13 | **36** | browser, two independent contexts |
+| **Total** | **37** | **333** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 17, `test/unit/rate-limit.test.ts` 10,
-`test/unit/platform.test.ts` 3, `test/friend-requests.test.ts` 5) run without a server; the thirteen
+`test/unit/platform.test.ts` 4, `test/friend-requests.test.ts` 5) run without a server; the thirteen
 integration files start a **real API process on port 3101** against the `*_test` database.
 
 **Last full run (2026-10-22, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `35 passed`. The browser suite
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `36 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
@@ -68,13 +68,13 @@ under §5.
 **`packages/protocol` (8)** — `PROTOCOL_VERSION` and the exact client/server event-name maps, so a
 renamed event cannot silently ship.
 
-**`apps/api/test/unit` (30)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
+**`apps/api/test/unit` (36)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
 'peer'`, dedup by `clientMessageId` scoped per sender, bounded history, `endedReasonFor`
 asymmetries including a ban that looks like an ordinary `peer_left` to both sides), the token-bucket
 limiter (`rate-limit`: burst, continuous refill, per-key
 independence, idle-key eviction, bounded key budget) and the platform policy default (`platform`:
-the cached value starts `false`, a missing `PlatformPolicy` row means `false` after a reload, and a
-stored `true` is adopted). `friend-requests.test.ts` (5) lives in the same harness but exercises only
+every switch starts `false`, a missing `PlatformPolicy` row means `false` for all three after a reload,
+and stored AI permissions are adopted independently of blocking). `friend-requests.test.ts` (5) lives in the same harness but exercises only
 the in-memory register and the click that completes a mutual agreement: one request per chat,
 deterministic expiry, an expired question that cannot be auto-accepted, lookup in either direction,
 and forgetting a closed chat.
@@ -89,8 +89,8 @@ Each file below runs against the live process; the descriptions are the guarante
 | `chat.test.ts` | 13 | Bidirectional delivery with per-recipient labels, ordering, length limits (exact-limit ok, over-limit refused), empty refused, `clientMessageId` dedup, non-participant refused, end-for-both, `chat:next`, reconnect within grace, end after grace, second tab isolation |
 | `matching.test.ts` | 8 | Two waiters paired into one chat, **no identity in two chats at once**, never matching itself from two sockets, peer User ID never leaked, cancel removes from queue, re-match after leave, disconnected identity dropped, unknown event answered |
 | `direct.test.ts` | 15 | Direct request delivery (sender ID disclosed because it is reciprocal), note length, unknown/self/malformed target, offline target, requests-off target, **blocked target refused without saying so**, blocked while in a chat, cancel on disconnect; accept (both IDs revealed), decline, wrong addressee, double answer, second-chat refusal |
-| `moderation.test.ts` | 11 | Report ends the chat and is asymmetric, non-participant/unknown reason refused; the owner's report list shows the reason, note, snapshot and both User IDs, edits only the status, refuses an anonymous caller and an unknown report; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
-| `platform.test.ts` | 4 | Blocking is readable and writable only with the owner key; the session view reports the platform value to every user; switching it off refuses a new block with `BLOCKING_DISABLED` (409) while leaving old blocks listed and removable, and switching it on allows blocks again; the body must be exactly `{ blockingEnabled: boolean }`. Every test restores the policy it found |
+| `moderation.test.ts` | 11 | Report ends the chat asymmetrically, the reported side receives `report:warning` while the reporter does not, the warning is readable and acknowledged over REST and acknowledgement is idempotent, non-participant/unknown reason refused; the owner's report list shows the reason, note, snapshot and both User IDs, edits only the status, refuses an anonymous caller and an unknown report; block ends the chat and tells only the blocker, non-participant refused, immediate queue separation, own block list only, pending invitation cancelled |
+| `platform.test.ts` | 5 | Blocking is readable and writable only with the owner key; the session view reports the platform value to every user; switching it off refuses a new block with `BLOCKING_DISABLED` (409) while leaving old blocks listed and removable, and switching it on allows blocks again; both AI permissions are stored independently of blocking and re-read from the server; the body must carry exactly the three booleans, so a partial or extra field is rejected. Every test restores the policy it found |
 | `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
 | `search-filters.test.ts` | 12 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), a declared country code, shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown country/unknown fields rejected, profile round-trip (including country) never exposed to another user; multi-place round-trip |
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
@@ -127,9 +127,9 @@ exactly one, non-secret, machine-independent way.
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
-| `admin.spec.ts` | 4 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept. The fourth journey bans a User ID with a reason: the row turns "Заблокирован", the live tab shows "Доступ закрыт", and after "Разбанить" the same tab reconnects as the same User ID |
+| `admin.spec.ts` | 5 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; both AI switches can be enabled and are still enabled after a reload (then reset through the API); switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept. The ban journey suspends a User ID with a reason: the row turns "Заблокирован", the live tab shows "Доступ закрыт", and after "Разбанить" the same tab reconnects as the same User ID |
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
-| `moderation.spec.ts` | 3 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload; a user blocks the peer through the chat dialog and the person appears in the bottom-right block list beside the friends list, stays there and remains removable after the owner switches new blocks off, without a policy notice in the settings |
+| `moderation.spec.ts` | 3 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, the reported person sees «На вас поступила жалоба», dismisses it, and it stays gone after a reload, while the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload; a user blocks the peer through the chat dialog and the person appears in the bottom-right block list beside the friends list, stays there and remains removable after the owner switches new blocks off, without a policy notice in the settings |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
 | `language.spec.ts` | 2 | The interface is Russian even in an `en-US` browser; the switch offers all three native names, changes `<html lang>`, the visible copy and (after a reload) the title, persists in both the cookie and `localStorage`, and returns to Russian; `/admin` stays Russian and declares `lang="ru"` while the public interface is English |
 
@@ -177,32 +177,33 @@ invalidates the friend query for the same reason, since a report severs the frie
 | 12 | Lookup by ID | `direct.spec.ts`, `errors.spec.ts` |
 | 13 | Unavailable user | `direct.spec.ts` (requests off), `errors.spec.ts` (unknown) |
 | 14 | Availability setting | `direct.spec.ts` (setting survives reload) |
-| 15 | Block + report | `moderation.spec.ts` (blocking through the chat dialog, the entry in the bottom block list, the list surviving the owner's switch, and the report reading in `/admin`) + `moderation.test.ts`, `rest.test.ts` |
+| 15 | Block + report | `moderation.spec.ts` (blocking through the chat dialog, the entry in the bottom block list, the list surviving the owner's switch, the report warning on the reported side, and the report reading in `/admin`) + `moderation.test.ts`, `rest.test.ts` |
 | 16 | Disconnect / reconnect | `resilience.spec.ts` (reload; API restart) + `chat.test.ts` (grace) |
 | 17 | No double assignment | `matching.test.ts` (server-level) |
 | 18 | Third party cannot join | `access.spec.ts` |
 | 19 | Filters really affect server matching | `search-filters.test.ts` (server) + `filters.spec.ts` |
-| 20 | Retention cleanup | **Partly covered.** The E2E stack runs the sweep and asserts widening; nothing asserts that a report, session or security event is deleted. The **archive's** retention query *is* covered: `archive.test.ts` backdates one archive and calls the same `deleteExpired` the sweep calls. See §6. |
+| 20 | Retention cleanup | **Partly covered.** The E2E stack runs the sweep and asserts widening; nothing asserts that a report, session, security event or stale report warning is deleted. The **archive's** retention query *is* covered: `archive.test.ts` backdates one archive and calls the same `deleteExpired` the sweep calls. See §6. |
 
 ## 6. What is NOT covered
 
 Listed so that no reader, and no future contributor, mistakes "green" for "complete".
 
 1. **Retention / stale-state cleanup (brief scenario 20).** `MaintenanceService.runOnce` is the
-   enforcement point for report, session, security-event, archive and queue deadlines. The integration
-   suite disables it (`MAINTENANCE_INTERVAL_MS=0`) so nothing races an assertion, and the E2E stack does
-   run it (250 ms) — but the only thing E2E asserts about it is that *widening* is announced. **No test
-   asserts that a report, session or security event is actually deleted, and none calls `runOnce` by
-   hand with a moved clock.** A test that advances a fake clock and asserts deletion is the single
-   most valuable missing test. The archive is the one exception: `archive.test.ts` backdates an archive
-   and calls `POST /admin/archives/delete-expired`, which runs the same `deleteExpired()` the sweep
-   runs — so the *query* is proved, though not the timer. COMPLIANCE §5.7 is marked accordingly.
+   enforcement point for report, session, security-event, archive, report-warning and queue deadlines.
+   The integration suite disables it (`MAINTENANCE_INTERVAL_MS=0`) so nothing races an assertion, and
+   the E2E stack does run it (250 ms) — but the only thing E2E asserts about it is that *widening* is
+   announced. **No test asserts that a report, session, security event or stale report warning is
+   actually deleted, and none calls `runOnce` by hand with a moved clock.** A test that advances a fake
+   clock and asserts deletion is the single most valuable missing test. The archive is the one
+   exception: `archive.test.ts` backdates an archive and calls `POST
+   /admin/archives/delete-expired`, which runs the same `deleteExpired()` the sweep runs — so the
+   *query* is proved, though not the timer. COMPLIANCE §5.7 is marked accordingly.
 2. **Block/report in a browser.** The report journey is covered end to end
-   (`moderation.spec.ts`: a user reports, the owner reads the snapshot and changes the status), and the
-   blocker's side of a block is now covered too (the dialog, the entry in the bottom block list, the list
-   surviving the policy switch, and unblocking). Nothing verifies the *peer's* screen at the moment the
-   chat ends when it is blocked; blocking a third party is covered only as a refusal
-   (`access.spec.ts`).
+   (`moderation.spec.ts`: a user reports, the reported side sees and acknowledges the warning, the owner
+   reads the snapshot and changes the status), and the blocker's side of a block is now covered too (the
+   dialog, the entry in the bottom block list, the list surviving the policy switch, and unblocking).
+   Nothing verifies the *peer's* screen at the moment the chat ends when it is blocked; blocking a third
+   party is covered only as a refusal (`access.spec.ts`).
 3. **Only Chromium.** No Firefox, no WebKit, no mobile viewport.
 4. **No accessibility audit.** ARIA roles are used and relied upon as locators, but there is no axe
    run, no keyboard-only pass, no screen-reader check.
@@ -225,8 +226,9 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
 13. **Web has no unit tests.** The Zustand store and the client state machine (`anonymous-client.ts`)
     are exercised only through E2E; there is no isolated test of their transitions.
 14. **The owner's `/admin` page is covered in a browser, partly.** `admin.spec.ts` drives the whole
-    archive journey — key, policy, recording, reading a transcript, deleting — and `moderation.spec.ts`
-    drives the platform switch and the report status, but the `criteria` and `selected` audiences are
+    archive journey — key, policy, recording, reading a transcript, deleting — and the two AI switches
+    surviving a reload; `moderation.spec.ts` drives the platform switch and the report status, but the
+    `criteria` and `selected` audiences are
     only exercised at the API level (`archive.test.ts`); no browser test picks a person by search. The
     page also has no coverage of its own error paths beyond a wrong key, and no accessibility audit
     (see item 4). Writing `admin.spec.ts` was itself the response to two defects that using the page by
@@ -239,6 +241,10 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
     adapter, no `ExternalIdentity` row and no bearer-token mode. `docs/INTEGRATIONS.md` lists the
     signature, link/unlink, bypass and two-context tests required before one can be called ready. This
     absence is deliberate, not a covered feature.
+16. **AI behaviour is not tested because no AI exists.** The tests cover storing the two owner
+    permissions and rendering their checkboxes; there is no provider, no adapter, no synthetic chat and
+    no autonomous action to test. The hidden companion has no "it is labelled" assertion by design
+    (D38), and no test can prove a model will not break character.
 
 ## 7. Reading a failure
 

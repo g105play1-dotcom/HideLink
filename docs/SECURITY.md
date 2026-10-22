@@ -217,6 +217,11 @@ would become a way to send a message).
 - A report ends the chat, takes its message snapshot from the server's own copy (never from client
   input), deletes any friendship with the reported peer in the same transaction, and is hard-deleted
   after `REPORT_RETENTION_DAYS`.
+- The reported identity gets a warning that a complaint exists and that access may be closed, up to a
+  ban (`report:warning` plus `GET /api/v1/me/report-warning`, acknowledged with `POST
+  /api/v1/me/report-warning/read`). It contains only the time: never the reporter, chat, reason, note or
+  snapshot. The reporter's side still sees `reported`; the target still sees `peer_left`, so the
+  warning is the only new disclosure (D38). A new report overwrites an unread warning.
 - The owner can suspend an identity from `/admin` (`POST`/`DELETE /api/v1/admin/identities/:publicId/ban`).
   A ban requires a stored reason, is enforced by the request guard and the socket handshake on every
   request, ends a live chat through the `identity.banned` event, closes the identity's sockets, and
@@ -226,7 +231,9 @@ would become a way to send a message).
   and `tests/e2e/specs/admin.spec.ts` cover the action, the live tab and unbanning.
   **Honest limitation:** banning an anonymous identity cannot outlast the identity. There is no
   registration and no device fingerprint (deliberately), so a banned person who clears cookies starts
-  over. Bans are a speed bump for abuse, not a ban of a human, and no code claims otherwise. The shared
+  over. Bans are a speed bump for abuse, not a ban of a human, and no code claims otherwise. The report
+  warning is likewise only a notice: it does not reveal whether the report will be actioned, and the
+  target can infer that the peer probably filed it because there is no other report path. The shared
   `ADMIN_TOKEN` also means a ban cannot yet be attributed to a particular moderator (`docs/DECISIONS.md`
   D36).
 
@@ -301,6 +308,7 @@ which is the enforcement point for every deadline in the schema:
 | Data | Deleted |
 | --- | --- |
 | Abuse reports (with message snapshot) | after `REPORT_RETENTION_DAYS` (30) |
+| Unread report warnings (`Identity.reportWarningAt`) | after `REPORT_RETENTION_DAYS` (30), or immediately when acknowledged; a warning cannot outlive the report that caused it |
 | Security events | after `SECURITY_EVENT_RETENTION_DAYS` (90) |
 | Sessions | after `SESSION_RETENTION_DAYS` (7) past expiring or being revoked |
 | Archived conversations (§13) | after the owner's `retentionDays`; `0` means only when the owner deletes them |
@@ -403,6 +411,11 @@ and the inbox; with no `ADMIN_TOKEN` those routes do not exist.
   `PlatformService` caches the value for the synchronous chat path. A new block is refused with
   `BLOCKING_DISABLED` (409) by both `block:peer` and `POST /blocks`. The unblock path is deliberately
   *not* gated: switching the action off must not trap anyone with a block they cannot lift.
+- **AI permissions.** The same row carries `aiAutonomyEnabled` and `aiCompanionEnabled`, both default
+  `false`. They are policy, not a working provider: no AI adapter exists, so nothing reads them yet. The
+  server getters are the only authority a future adapter may consult; a prompt or client field cannot
+  grant either permission (D38). The switches are visible only in `/admin`; they are not part of a
+  user's session view.
 - **Reports.** `GET /admin/reports?limit=` returns non-expired reports newest first;
   `PATCH /admin/reports/:id` accepts only `{ status }` (`open`, `reviewed`, `actioned`, `dismissed`).
   Reason, details, participants, chat id and the message snapshot are evidence and cannot be edited
@@ -422,8 +435,9 @@ and the inbox; with no `ADMIN_TOKEN` those routes do not exist.
 - **What is not exposed.** The panel is not reachable from the user application; the report form does
   not reveal the peer's User ID in a random chat, and the report response to the reporter contains
   only an id. Report text is rendered as text by React (no HTML), so a hostile reporter cannot inject
-  markup into the owner's page. A banned person is not told anything about the reporter or the peer;
-  the peer is not told that a ban happened.
+  markup into the owner's page. A reported person is told only that a complaint and a possible ban
+  exist, never the reporter, reason or evidence; a banned person is not told anything about the
+  reporter or the peer, and the peer is not told that a ban happened.
 
 ## 14. Known gaps and what must happen before a public deployment
 
@@ -489,6 +503,16 @@ Each item says what is missing and how it would be verified. None of them is a f
     logged (values, not content). Reads, deletions and report status changes leave no trace. With one
     owner there is no "who" to record — only "when", which is not recorded either. *Verify:* add
     owner accounts and an append-only admin audit trail before a second person gets the key.
+17. **AI is a stored permission, not a feature.** `aiAutonomyEnabled` and `aiCompanionEnabled` can be
+    switched on in `/admin`, but there is no provider, adapter, credential, data-processing agreement,
+    budget, audit trail or synthetic-peer marker. Nothing sends text to a model, and an autonomous ban
+    is not implemented. The hidden companion (D38) would also be the first feature whose honesty cannot
+    be verified by a test: a model may break character, and the interface deliberately does not label it.
+    *Verify:* choose a provider and terms, implement the adapter behind `apps/api/src/integrations/ai/`,
+    test that the server switch is re-read at action time, that no User ID/session/report/archive reaches
+    the provider, that a timeout fails closed, and that every synthetic chat is identifiable to the owner
+    without being disclosed to the user. Until then, leaving both switches off is the only accurate
+    description of the product.
 
 ## 15. Facts a reader can verify
 

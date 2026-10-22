@@ -143,6 +143,7 @@ export class ModerationService {
    */
   async createReport(input: ReportInput): Promise<string> {
     const reportId = newReportId();
+    const reportedAt = new Date();
     const expiresAt = new Date(
       Date.now() + this.config.REPORT_RETENTION_DAYS * 24 * 60 * 60 * 1000,
     );
@@ -162,6 +163,15 @@ export class ModerationService {
           ...(input.details ? { details: input.details } : {}),
         },
       }),
+      // The target is told that a complaint exists, without any evidence. This is
+      // deliberately the opposite of the old "reports are silent" rule: the owner asked
+      // for a warning with a possible-ban consequence (D38). A new report replaces an
+      // older unread warning; acknowledging it means clearing the column, not deleting
+      // the report.
+      this.prisma.identity.update({
+        where: { id: input.targetId },
+        data: { reportWarningAt: reportedAt },
+      }),
       // Reporting a friend is a safety action: the link must not survive it, or the
       // reported person would keep a one-click way back to the reporter.
       this.prisma.friendship.deleteMany({
@@ -176,7 +186,38 @@ export class ModerationService {
 
     // Deliberately logs no reason and no content: the report row is the record.
     log.security('report.created', { retentionDays: this.config.REPORT_RETENTION_DAYS });
+    // The target may be offline; the stored timestamp is what the REST bootstrap reads.
+    this.bus.emit({
+      type: 'report.warning',
+      userId: input.targetId,
+      reportedAt: reportedAt.toISOString(),
+    });
     return reportId;
+  }
+
+  /** The unread report warning for one identity, if any. */
+  async getReportWarning(userId: string): Promise<Date | null> {
+    const row = await this.prisma.identity.findUnique({
+      where: { id: userId },
+      select: { reportWarningAt: true },
+    });
+    return row?.reportWarningAt ?? null;
+  }
+
+  /**
+   * Marks the warning as seen by clearing it.
+   *
+   * Idempotent: acknowledging with nothing pending is not an error. A report that arrives
+   * between the read and this call replaces the timestamp, and this call clears the newer
+   * one too; that is acceptable because the target is dismissing a warning they were just
+   * shown, and the report itself is untouched.
+   */
+  async acknowledgeReportWarning(userId: string): Promise<boolean> {
+    const result = await this.prisma.identity.updateMany({
+      where: { id: userId, reportWarningAt: { not: null } },
+      data: { reportWarningAt: null },
+    });
+    return result.count > 0;
   }
 
   /**

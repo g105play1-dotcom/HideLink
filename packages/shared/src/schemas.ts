@@ -219,10 +219,19 @@ export const ownerMessageParamsSchema = z.object({ id: z.uuid() }).strict();
 /**
  * REST: `PUT /api/v1/admin/platform`.
  *
- * A whole object with one required field, `.strict()`: a request that tries to set
+ * A whole object with three required switches, `.strict()`: a request that tries to set
  * anything the owner surface does not control is rejected rather than silently ignored.
+ * A full replace is deliberate — the admin page always sends the complete policy it just
+ * read, so one field cannot be changed while another is accidentally reset by a partial
+ * body.
  */
-export const adminPlatformSchema = z.object({ blockingEnabled: z.boolean() }).strict();
+export const adminPlatformSchema = z
+  .object({
+    blockingEnabled: z.boolean(),
+    aiAutonomyEnabled: z.boolean(),
+    aiCompanionEnabled: z.boolean(),
+  })
+  .strict();
 
 /** REST: `GET /api/v1/admin/reports?limit=` */
 export const adminReportListQuerySchema = z

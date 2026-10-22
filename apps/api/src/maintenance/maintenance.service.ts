@@ -35,6 +35,8 @@ export interface MaintenanceReport {
   deletedArchivedMessages: number;
   /** "Contact the owner" messages deleted because their retention deadline passed. */
   deletedOwnerMessages: number;
+  /** Unread report warnings cleared once the report's retention window has passed. */
+  clearedReportWarnings: number;
 }
 
 /**
@@ -48,6 +50,7 @@ export interface MaintenanceReport {
  * meaningful if something actually deletes the data, so `enforceRetention` is the
  * enforcement point for every deadline in the schema:
  *  - abuse reports (and their message snapshot) after `REPORT_RETENTION_DAYS`;
+ *  - unread report warnings after the same window, so they cannot outlive the evidence;
  *  - security events after `SECURITY_EVENT_RETENTION_DAYS`;
  *  - sessions after `SESSION_RETENTION_DAYS` past becoming invalid;
  *  - archived conversations after the owner's own retention (`retentionDays`), when the
@@ -115,6 +118,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       deletedArchives: 0,
       deletedArchivedMessages: 0,
       deletedOwnerMessages: 0,
+      clearedReportWarnings: 0,
     };
 
     try {
@@ -153,25 +157,35 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       | 'deletedArchives'
       | 'deletedArchivedMessages'
       | 'deletedOwnerMessages'
+      | 'clearedReportWarnings'
     >
   > {
     const at = new Date(now);
     const sessionCutoff = new Date(now - this.config.SESSION_RETENTION_DAYS * DAY_MS);
+    // The warning has no separate deadline: it is cleared when acknowledged, and otherwise
+    // cannot outlive the report that caused it. Without this, an unread timestamp would
+    // stay on the identity forever after the evidence itself was deleted (D38).
+    const warningCutoff = new Date(now - this.config.REPORT_RETENTION_DAYS * DAY_MS);
 
-    const [reports, securityEvents, sessions, archives, expiredOwnerMessages] = await Promise.all([
-      this.prisma.report.deleteMany({ where: { expiresAt: { lt: at } } }),
-      this.prisma.securityEvent.deleteMany({ where: { expiresAt: { lt: at } } }),
-      this.prisma.session.deleteMany({
-        where: {
-          OR: [{ expiresAt: { lt: sessionCutoff } }, { revokedAt: { lt: sessionCutoff } }],
-        },
-      }),
-      // The archive's own deadline is per policy rather than an environment value: the
-      // owner sets it, `0` means "keep until I delete it", and `deleteExpired` is the one
-      // query that both this sweep and the owner's "delete expired now" button call.
-      this.archive.deleteExpired(now),
-      this.ownerMessages.deleteExpired(now),
-    ]);
+    const [reports, securityEvents, sessions, archives, expiredOwnerMessages, warnings] =
+      await Promise.all([
+        this.prisma.report.deleteMany({ where: { expiresAt: { lt: at } } }),
+        this.prisma.securityEvent.deleteMany({ where: { expiresAt: { lt: at } } }),
+        this.prisma.session.deleteMany({
+          where: {
+            OR: [{ expiresAt: { lt: sessionCutoff } }, { revokedAt: { lt: sessionCutoff } }],
+          },
+        }),
+        // The archive's own deadline is per policy rather than an environment value: the
+        // owner sets it, `0` means "keep until I delete it", and `deleteExpired` is the one
+        // query that both this sweep and the owner's "delete expired now" button call.
+        this.archive.deleteExpired(now),
+        this.ownerMessages.deleteExpired(now),
+        this.prisma.identity.updateMany({
+          where: { reportWarningAt: { lt: warningCutoff } },
+          data: { reportWarningAt: null },
+        }),
+      ]);
 
     return {
       deletedReports: reports.count,
@@ -180,6 +194,7 @@ export class MaintenanceService implements OnModuleInit, OnApplicationShutdown {
       deletedArchives: archives.deletedArchives,
       deletedArchivedMessages: archives.deletedMessages,
       deletedOwnerMessages: expiredOwnerMessages,
+      clearedReportWarnings: warnings.count,
     };
   }
 }

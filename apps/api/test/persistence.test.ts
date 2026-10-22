@@ -314,6 +314,9 @@ describe('sessions and identities', () => {
         'lastSeenAt',
         'bannedAt',
         'bannedReason',
+        // A moderation notice, not contact data: the time the last unread report named
+        // this identity. It is cleared when the warning is acknowledged (D38).
+        'reportWarningAt',
         'incomingRequests',
         // A preference like the one above, not data about the person: whether the block
         // action is offered at all (docs/DECISIONS.md D24).

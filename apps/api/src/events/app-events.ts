@@ -88,6 +88,14 @@ export type AppEvent =
   | { type: 'friend.removed'; userId: string; publicId: string }
   // --- moderation ----------------------------------------------------------
   /**
+   * A report named this identity.
+   *
+   * The target is told that a complaint exists and that a ban is possible, but not who
+   * filed it, which chat it came from, or what it says. The warning is also stored on the
+   * identity row, so an offline person sees it on the next load.
+   */
+  | { type: 'report.warning'; userId: string; reportedAt: string }
+  /**
    * The owner suspended an identity.
    *
    * Carries no public reason: the peer of a live chat must not learn that the other side

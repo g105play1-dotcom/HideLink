@@ -1,4 +1,4 @@
-import { ErrorCode } from '@anonlink/shared';
+import { ErrorCode, type AdminPlatformView } from '@anonlink/shared';
 import type {
   AckResult,
   ChatView,
@@ -126,15 +126,22 @@ export async function adminHttp<T = unknown>(
  * asked for that on 2026-10-20), so a test that forgets it would fail with
  * `BLOCKING_DISABLED` and look like a regression in blocking itself.
  */
-export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
-  const result = await adminHttp('/admin/platform', {
-    method: 'PUT',
-    body: { blockingEnabled },
-  });
-
+export async function setPlatformPolicy(policy: AdminPlatformView): Promise<void> {
+  const result = await adminHttp('/admin/platform', { method: 'PUT', body: policy });
   if (result.status !== 200) {
     throw new Error(`PUT /admin/platform failed: ${result.status} ${JSON.stringify(result.body)}`);
   }
+}
+
+export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
+  const current = await adminHttp<AdminPlatformView>('/admin/platform');
+  if (current.status !== 200) {
+    throw new Error(
+      `GET /admin/platform failed: ${current.status} ${JSON.stringify(current.body)}`,
+    );
+  }
+
+  await setPlatformPolicy({ ...current.body, blockingEnabled });
 }
 
 type RealtimeSocket = Socket<ServerToClientEvents, ClientToServerEvents>;

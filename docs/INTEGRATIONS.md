@@ -152,7 +152,8 @@ An integration is not "ready" because a bot answers. It needs:
 ## AI providers (planned, not implemented)
 
 AI is a different integration from a social network: no external account is linked, but text may leave
-the process. `docs/DECISIONS.md` D37 fixes the boundary. Two products are possible and must not be
+the process. `docs/DECISIONS.md` D37 fixes the moderation-assistant boundary; D38 adds the owner
+permissions and supersedes the companion's disclosure rule. Two products are possible and must not be
 confused:
 
 ### 1. Moderation assistant — the first step
@@ -183,13 +184,29 @@ Configuration belongs in `apps/api/src/config/env.ts`, `.env.example` and `docs/
 `AI_ENABLED` (off by default), `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` (server-only), `AI_TIMEOUT_MS`,
 `AI_MAX_INPUT_CHARS`, `AI_MONTHLY_BUDGET_USD` (or a token cap). No variable may be exposed to the browser.
 
-### 2. AI companion — later, labelled and opt-in
+### 2. AI companion — hidden fallback after a failed search
 
-A companion is a separate entry point, not a participant in random human matching. Before the first
-message the interface says it is an AI; it cannot claim to be a human, receive a User ID or profile data,
-or be reached through `request:send`. Its transcripts follow a separate retention rule and are never
-silently written into the human archive. The chat domain should see it as a distinct `ChatKind`/adapter,
-not as a fake peer with a hidden flag.
+D38 supersedes D37's "opt-in and clearly labelled" companion wording. The owner wants it to look like an
+ordinary random peer; the interface does not say it is an AI. It is still a separate integration, not a
+participant in the human queue:
+
+- **Ordering.** Normal matching runs first. The companion may be offered only when no eligible human was
+  found after the configured wait; it must never take a ticket, pre-empt a waiting person or enter the
+  pool as a fake identity. The exact trigger wait is a configuration decision to be made with the
+  adapter.
+- **Search criteria.** The adapter receives the `SearchPreferences` actually in force — genders, age
+  range, countries/regions/cities, languages, `relaxAllowed` and the current step — so the persona can
+  satisfy the user's filters. It may receive the interface language needed to converse. It must not
+  receive the searcher's User ID, session token, blocks, friendships, reports, archive content or
+  IP/user-agent hashes. If the persona cannot fit the active criteria, no chat is created.
+- **Server authority.** The model produces message text only; the server creates the chat through the
+  normal `ChatService` path, applies message length and rate limits, and never lets prompt output call
+  `block`, `report`, `friend`, ban or matching operations.
+- **Hidden, but marked server-side.** A server-only marker is required so the owner and retention code
+  can identify a synthetic chat for moderation and deletion. It must never appear in `ChatView`, the
+  protocol, the DOM or logs visible to the user. A provider failure ends the chat like a peer leaving.
+- **Retention.** Synthetic transcripts need their own decision and retention rule; they must not be
+  silently mixed into the human archive. This is not built.
 
 ### Abuse, privacy and failure rules
 
@@ -208,5 +225,8 @@ not as a fake peer with a hidden flag.
 Unit tests for redaction, input bounds and the adapter's timeout/error mapping; API tests proving the
 assistant cannot ban or change a report and that a disabled `AI_ENABLED` refuses the route; a test that
 no User ID or session token appears in the adapter payload; an E2E test where the owner receives a
-suggestion and still has to press the real action. The AI companion needs its own disclosure and
-consent tests, and must never appear in the random human queue.
+suggestion and still has to press the real action. The AI companion needs its own tests that it never
+appears in the human queue, that its payload contains the active criteria but no identity/session/report
+data, that a persona which fails the criteria produces no chat, and that `aiCompanionEnabled=false`
+refuses the fallback. Because the companion is hidden by decision, there is no "it is labelled"
+assertion to write; the honest limitation is recorded in D38 and `docs/SECURITY.md`.

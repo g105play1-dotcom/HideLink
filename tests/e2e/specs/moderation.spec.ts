@@ -107,6 +107,19 @@ test.describe('moderation panel', () => {
     await dialog.getByRole('button', { name: 'Отправить жалобу', exact: true }).click();
     await expect(dialog).toBeHidden();
 
+    // The reported side now sees a warning with the possible-ban consequence. It names
+    // neither the reporter nor the evidence, and acknowledging it is durable.
+    const warning = reporter.page.getByRole('dialog', { name: 'На вас поступила жалоба' });
+    await expect(warning).toBeVisible();
+    await warning.getByRole('button', { name: 'Понятно', exact: true }).click();
+    await expect(warning).toBeHidden();
+
+    await reporter.page.reload();
+    await expect(connectionStatus(reporter.page)).toHaveText('На связи', { timeout: 30_000 });
+    await expect(
+      reporter.page.getByRole('dialog', { name: 'На вас поступила жалоба' }),
+    ).toHaveCount(0);
+
     const owner = await openOwnerPage(browser);
     try {
       await signIn(owner.page);

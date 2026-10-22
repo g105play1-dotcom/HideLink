@@ -12,7 +12,7 @@
  * against the same `*_test` database — so a leftover row here would fail a suite that has
  * nothing to do with this one.
  */
-import { DEFAULT_ARCHIVE_POLICY } from '@anonlink/shared';
+import { DEFAULT_ARCHIVE_POLICY, type AdminPlatformView } from '@anonlink/shared';
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 import { E2E_ADMIN_TOKEN, E2E_API_BASE } from '../env';
@@ -91,17 +91,30 @@ async function ownerApi(path: string, init: RequestInit = {}): Promise<void> {
 }
 
 /**
- * Sets the platform-wide blocking policy.
+ * Sets the platform-wide policy.
  *
  * Used by the stack fixture (most specs test blocking mechanics, not the shipped default)
  * and by the moderation spec's teardown. Goes straight to the API: a cleanup that depends
- * on the interface under test is not a cleanup.
+ * on the interface under test is not a cleanup. The endpoint is a full replace, so the
+ * current switches are read first and only the requested ones are changed.
  */
-export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
+export async function setPlatformPolicy(update: Partial<AdminPlatformView>): Promise<void> {
+  const response = await fetch(`${E2E_API_BASE}/admin/platform`, {
+    headers: { authorization: `Bearer ${E2E_ADMIN_TOKEN}` },
+  });
+  if (!response.ok) {
+    throw new Error(`[e2e] owner API GET /admin/platform answered ${response.status}`);
+  }
+  const current = (await response.json()) as AdminPlatformView;
+
   await ownerApi('/admin/platform', {
     method: 'PUT',
-    body: JSON.stringify({ blockingEnabled }),
+    body: JSON.stringify({ ...current, ...update }),
   });
+}
+
+export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void> {
+  await setPlatformPolicy({ blockingEnabled });
 }
 
 /** Puts the archive back to the shipped default: switched off, and empty. */

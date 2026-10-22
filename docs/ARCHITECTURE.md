@@ -136,6 +136,25 @@ Relaxation is how a long, heavily-filtered search is eventually matched.
 
 Timing defaults (`apps/api/src/config/env.ts`): `MATCH_RELAX_AFTER_MS = 45000`, `MATCH_RELAX_STEP_MS = 20000`, `MAINTENANCE_INTERVAL_MS = 15000`. Setting `MATCH_RELAX_AFTER_MS = 0` disables widening entirely — the integration suite does this (`apps/api/test/support/test-env.ts`), while the e2e stack runs the sweep at 250 ms and relaxes after 4 s (`tests/e2e/env.ts`).
 
+### The AI companion fallback (planned, not implemented)
+
+`PlatformPolicy.aiCompanionEnabled` is stored and editable at `/admin`, but no provider or adapter exists
+(D38). The intended placement is a **fallback after** `claimOrEnqueue` has found no eligible human, never
+a ticket in the queue and never a candidate that outranks a waiting person. The trigger wait, and whether
+the relaxation ladder must finish first, are configuration decisions to be made with the adapter; until
+then the getter has no consumer.
+
+When it is built, the adapter must receive the `SearchPreferences` actually in force (genders, age range,
+countries/regions/cities, languages, `relaxAllowed`, current step) so the persona can satisfy the
+searcher's filters; if it cannot, the fallback fails closed and no chat is created. It must not receive the
+searcher's User ID, session token, blocks, friendships, reports, archive content or IP/user-agent hashes.
+The chat is created through the same `ChatService`/`ChatRegistryService` path as a human chat — the model
+only produces message text through the same length and rate limits — and the peer sees a normal per-chat
+alias with `from: 'peer'`. A server-only marker will be needed to tell the owner and the retention code
+that the peer is synthetic; it must never enter `ChatView` or the protocol. A provider timeout or error
+ends the chat like any vanished peer rather than exposing an infrastructure failure. The full product and
+privacy decision is D38; D37's assistant half remains the read-only, human-confirmed path.
+
 ### Rollback path on database failure
 
 `ChatService.createAndPersistChat` bridges the synchronous decision to durable state: cancel both tickets, `registry.create(...)` in memory, then `await prisma.chatSession.create(...)`. If the write throws, `registry.abort(chatId)` removes the in-memory chat and **both** participants are re-enqueued with their own `relaxAllowed`; the caller gets a generic `INTERNAL_ERROR` and the failure is logged as `chat.persist_failed`. In-memory state never survives a decision the database rejected.
@@ -166,12 +185,12 @@ PostgreSQL is the only durable store. It holds identity and session metadata, mo
 
 | Model | Purpose | Notable fields |
 | --- | --- | --- |
-| `Identity` | one anonymous identity; no sign-up | `publicId` (unique), `lastSeenAt`, `bannedAt`, `incomingRequests`, declared profile + filter columns |
+| `Identity` | one anonymous identity; no sign-up | `publicId` (unique), `lastSeenAt`, `bannedAt`, `reportWarningAt`, `incomingRequests`, declared profile + filter columns |
 | `Session` | a bearer session | `tokenHash` (unique, `Char(64)`), `expiresAt`, `revokedAt`, optional `ipHash`/`userAgentHash` |
 | `ChatSession` | one lifecycle row per chat | `kind`, `status`, `startedAt`, `endedAt`, `endReason`, participants, `initiatorId`, `messageCount` |
 | `Block` | one-directional block | `blockerId`, `blockedId`, unique together |
 | `Report` | abuse report | `reason`, `details`, `messageId`, `messageSnapshot`, `status`, `expiresAt` |
-| `PlatformPolicy` | installation-wide switches the owner sets in `/admin` | fixed id `default`, `blockingEnabled` (default `false`; a missing row means off) |
+| `PlatformPolicy` | installation-wide switches the owner sets in `/admin` | fixed id `default`, `blockingEnabled`, `aiAutonomyEnabled`, `aiCompanionEnabled` (all default `false`; a missing row means off) |
 | `Friendship` | one mutual, persistent link created by explicit consent in a chat | canonical `userIdA < userIdB` (unique, DB `CHECK`), `createdAt`; no alias, presence or transcript |
 | `SecurityEvent` | low-frequency, high-signal events | `type`, `identityId`, `targetId`, `expiresAt` |
 | `OwnerMessage` | one message a user sent the owner (topic, text, optional contact) | `topic`, `text`, `contact`, `identityId`, `expiresAt` |
@@ -192,13 +211,15 @@ owner's opt-in feature.
 
 **The inbox seam.** `OwnerMessageService` (`apps/api/src/owner/`) is a leaf that knows only Prisma and the configured retention: `OwnerController` validates the body and applies the per-identity budget, `ArchiveModule` renders the inbox on the owner's admin API, and `MaintenanceService` deletes expired rows. It imports no feature module, so no cycle is possible; the owner's key is the only credential, shared with the archive through `AdminGuard`.
 
-**The platform-policy seam.** `PlatformService` (`apps/api/src/platform/`) is a leaf with one dependency, Prisma. It loads the single `PlatformPolicy` row at boot and answers `blockingEnabled()` **synchronously**, because `ChatService.assertBlockingAllowed` runs inside the chat domain's critical section and must not await a query (the same constraint as `DirectoryService`, §4). `PUT /admin/platform` writes the row and replaces the cache; a missing row or a failed read means `false`, so the failure mode is "the action is unavailable", never "the action was silently granted". The chat domain calls one method and does not know where the switch is stored; the owner's routes live on `ArchiveModule`'s `AdminController`, which is the single guarded surface for `/admin` (D31).
+**The platform-policy seam.** `PlatformService` (`apps/api/src/platform/`) is a leaf with one dependency, Prisma. It loads the single `PlatformPolicy` row at boot and answers `blockingEnabled()`, `aiAutonomyEnabled()` and `aiCompanionEnabled()` **synchronously**, because `ChatService.assertBlockingAllowed` runs inside the chat domain's critical section and must not await a query (the same constraint as `DirectoryService`, §4). `PUT /admin/platform` writes the row and replaces the cache; a missing row or a failed read means `false` for every switch, so the failure mode is "the action is unavailable", never "the action was silently granted". The AI getters are the server-side seam for a future adapter; no adapter consumes them yet (D38). The owner's routes live on `ArchiveModule`'s `AdminController`, which is the single guarded surface for `/admin` (D31).
 
 **The moderation seam.** `ModerationService.listReports` and `setReportStatus` are additions to the existing moderation leaf; they read the same `Report` rows the socket path writes and reuse `REPORT_ADMIN_SELECT`. The owner's `AdminController` exposes them, `apps/web/src/components/admin-screen.tsx` renders them, and nothing in the chat path depends on the panel. Status is the *only* mutable field: `reportStatusSchema` is `.strict()` and the update's `data` contains nothing else, so evidence cannot be rewritten by a later caller. `ModerationService.ban/unban` live in the same leaf and own the identity row and its friendships; they publish `identity.banned` instead of importing the gateway.
 
+**The report-warning seam.** `createReport` also writes `Identity.reportWarningAt` inside the report transaction and publishes `report.warning` after it commits (D38). `ModerationController` exposes only the caller's own notice: `GET /me/report-warning` returns the timestamp or `null`, and `POST /me/report-warning/read` clears it. The event carries the same timestamp and is only a hint; the REST read is the durable source, so an offline target sees the warning on the next boot and a reload cannot lose it. The payload deliberately has no reporter, chat, reason or snapshot, which is why the controller sits in `moderation/` without importing the chat domain. The gateway maps `report.warning` to `report:warning`; the web client bumps a store version, and `ReportWarningDialog` fetches and acknowledges through REST.
+
 **The friends seam.** `FriendsService` (`apps/api/src/friends/`) owns the durable `Friendship` rows and is the only writer of the canonical pair: it sorts the two identities, refuses a duplicate, and returns one `FriendView` per viewer. `FriendRequestService` is a pure in-memory register (one request per chat, 60 s deadline, a closed-chat set) with no Prisma dependency. `ChatService` owns the policy — a request is allowed only inside an active chat, acceptance is atomic with taking the request, and `endChat` cancels a pending question for both sides. `ModerationService` deletes the pair inside the same transaction as a block or report, and `IdentityService.rotate` deletes the old identity's pairs silently. The gateway only renders `friend:incoming` / `friend:resolved` / `friend:removed` from `AppEvent`s and restores the pending question on `session:ready`; `FriendsController` exposes the caller's own list and unilateral removal. The chat domain never imports the gateway, and `/admin` has no friends surface (D34).
 
-**Migrations are additive**: adding an optional or defaulted column is acceptable; dropping or rewriting one requires a written rollback plan (`AGENTS.md`). Ten migrations are committed under `apps/api/prisma/migrations/`: `20261018000147_init`, `20261018023949_add_search_preferences`, `20261019064049_add_chat_archives` (four new tables, no change to an existing one), `20261019120000_add_blocking_toggle` (one defaulted column, now legacy and unread after D31), `20261019153000_search_multiple_places` (the only destructive step in the history — it carries the old choice into a new column before dropping it, and its file holds the rollback plan), `20261019180000_add_owner_messages` (one new enum and one new table), `20261019210000_search_place_lists` (place-list columns for profile and filters), `20261020120000_platform_policy` (one new table, no change to an existing one), `20261020130000_country_fields` (a nullable country column for the profile and a country list for filters) and `20261020140000_add_friendships` (one new table, its unique pair index and a canonical-order `CHECK`, no change to an existing one). The test database is prepared with `prisma migrate deploy` (`apps/api/test/global-setup.ts`).
+**Migrations are additive**: adding an optional or defaulted column is acceptable; dropping or rewriting one requires a written rollback plan (`AGENTS.md`). Twelve migrations are committed under `apps/api/prisma/migrations/`: `20261018000147_init`, `20261018023949_add_search_preferences`, `20261019064049_add_chat_archives` (four new tables, no change to an existing one), `20261019120000_add_blocking_toggle` (one defaulted column, now legacy and unread after D31), `20261019153000_search_multiple_places` (the only destructive step in the history — it carries the old choice into a new column before dropping it, and its file holds the rollback plan), `20261019180000_add_owner_messages` (one new enum and one new table), `20261019210000_search_place_lists` (place-list columns for profile and filters), `20261020120000_platform_policy` (one new table, no change to an existing one), `20261020130000_country_fields` (a nullable country column for the profile and a country list for filters), `20261020140000_add_friendships` (one new table, its unique pair index and a canonical-order `CHECK`, no change to an existing one) and `20261022130000_add_report_warning_and_ai_policy` (one nullable warning timestamp and two defaulted AI switches, no data rewritten). The test database is prepared with `prisma migrate deploy` (`apps/api/test/global-setup.ts`).
 
 **Retention** (`MaintenanceService.enforceRetention`) hard-deletes rows whose deadlines passed:
 
@@ -209,9 +230,11 @@ session.deleteMany       where expiresAt < now - SESSION_RETENTION_DAYS
                             or revokedAt < now - SESSION_RETENTION_DAYS
 chatArchive.deleteMany   where expiresAt is not null and expiresAt < now   (cascades to messages)
 ownerMessage.deleteMany  where expiresAt        < now
+identity.updateMany      where reportWarningAt  < now - REPORT_RETENTION_DAYS
+                         set reportWarningAt = null
 ```
 
-`Identity` rows are never deleted here: they hold a random ID and timestamps, and deleting one would cascade away the reports describing abuse it may have committed. `Friendship` rows also have no timer: they disappear only when one side removes the contact, or when a block, report or identity rotation deletes the pair (`docs/DECISIONS.md` D34). The archive's `expiresAt` is only ever set when the owner chose a non-zero `retentionDays`; the same query is reachable on demand as `POST /api/v1/admin/archives/delete-expired`, because the interval is zero in tests and the sweep is not otherwise callable.
+The warning timestamp is cleared, not the identity: an unread report warning cannot outlive the report that caused it, but the identity and its moderation history stay. `Identity` rows are never deleted here: they hold a random ID and timestamps, and deleting one would cascade away the reports describing abuse it may have committed. `Friendship` rows also have no timer: they disappear only when one side removes the contact, or when a block, report or identity rotation deletes the pair (`docs/DECISIONS.md` D34). The archive's `expiresAt` is only ever set when the owner chose a non-zero `retentionDays`; the same query is reachable on demand as `POST /api/v1/admin/archives/delete-expired`, because the interval is zero in tests and the sweep is not otherwise callable.
 
 ---
 
@@ -228,7 +251,7 @@ interface ErrorPayload { code: ErrorCode; message: string; context?: string }
 
 `ChatGateway.guard()` calls `ack({ ok: true, data })` on success; on failure it calls `ack({ ok: false, error })` if a callback was supplied, otherwise it pushes the same payload as `app:error` to that one socket. Client→server events are `match:join`, `match:cancel`, `chat:message`, `chat:leave`, `chat:next`, `request:send`, `request:respond`, `report:send`, `block:peer`, `friend:request`, `friend:respond`.
 
-**Push events.** `ServerEvent` defines `session:ready`, `session:rotated`, `match:queued`, `match:cancelled`, `match:relaxed`, `chat:started`, `chat:resumed`, `chat:message`, `chat:peer-away`, `chat:peer-back`, `chat:ended`, `request:incoming`, `request:resolved`, `peer:blocked`, `friend:incoming`, `friend:resolved`, `friend:removed`, `app:error`. The chat domain never imports the gateway: state changes are published as `AppEvent`s on `AppEventBus` (`apps/api/src/events/app-events.ts`) and rendered by `ChatGateway.onAppEvent`, once per socket, in `chat.views.ts`. That is why a message reads as `from: 'you'` for its sender and `from: 'peer'` for everyone else, and an end reason as `left` to the leaver and `peer_left` to the peer.
+**Push events.** `ServerEvent` defines `session:ready`, `session:rotated`, `match:queued`, `match:cancelled`, `match:relaxed`, `chat:started`, `chat:resumed`, `chat:message`, `chat:peer-away`, `chat:peer-back`, `chat:ended`, `request:incoming`, `request:resolved`, `peer:blocked`, `friend:incoming`, `friend:resolved`, `friend:removed`, `report:warning`, `app:error`. The chat domain never imports the gateway: state changes are published as `AppEvent`s on `AppEventBus` (`apps/api/src/events/app-events.ts`) and rendered by `ChatGateway.onAppEvent`, once per socket, in `chat.views.ts`. That is why a message reads as `from: 'you'` for its sender and `from: 'peer'` for everyone else, and an end reason as `left` to the leaver and `peer_left` to the peer.
 
 **The server is authoritative.** The client never decides who sees what: every send, join, leave, block and report is authorised in `ChatService` against the registry's participant list, and the gateway only validates shape and rate limits. `reportChat` takes the `messageSnapshot` from the server's own copy of the message; `block:peer` is keyed by `chatId` because a random chat must not reveal the peer's User ID; and `ChatRecord.revealPublicId` returns `undefined` for every random chat, so no call site can disclose it by forgetting a check.
 

@@ -34,7 +34,7 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 | Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it, and the archive already has inert `storeMedia`/`mediaKind` fields waiting for it) |
 | VK / Telegram integration | The owner plans it, but no provider credentials, account-linking decision or platform review exists yet | A provider-verified `ExternalIdentity` link, optional bearer-token bootstrap for cookie-less embeds, adapters under `apps/api/src/integrations/` and `apps/web/src/integrations/`, secrets, retention/unlink policy, and platform moderation mapping. Seam: `docs/INTEGRATIONS.md`, D35 |
 | Chat archive *encryption and audit* | The archive itself is built (D21); protecting it further is separate work | Encryption at rest (a volume or a key outside the process), an audit trail of owner actions, and a rehearsed restore that treats transcripts as the sensitive asset |
-| AI moderator assistant / AI companion | The owner asked whether AI can moderate or chat; both are plausible, but neither provider nor data-processing terms are chosen. D37 fixes the boundary: assistant is human-confirmed and read-only, companion is opt-in and labelled | A provider-agnostic adapter under `apps/api/src/integrations/ai/`, server-only credentials, redaction, timeouts/cost caps, an audit trail, separately disclosed retention, and an explicit owner decision on provider and autonomy |
+| AI moderator assistant / AI companion | The owner asked whether AI can moderate or chat; both are plausible, but neither provider nor data-processing terms are chosen. D37 fixes the assistant boundary (human-confirmed, read-only); D38 supersedes the companion: it is a hidden fallback after a failed search, gated by an off-by-default switch, and must receive the user's search criteria | A provider-agnostic adapter under `apps/api/src/integrations/ai/`, server-only credentials, redaction, timeouts/cost caps, an audit trail, a synthetic-peer marker, separately disclosed retention, and an explicit owner decision on provider and autonomy. The two permissions are stored but nothing consumes them yet |
 | Moderation *accounts* and per-person audit | The report panel, blocking switch and ban endpoint exist (D31, D36), but a second person with the key would be indistinguishable from the owner | A moderator account model, an append-only audit trail, and an `AdminGuard` replacement that attaches the actor; ban semantics do not need to change |
 | Ads / Premium | Brief forbids fake monetisation; core chat comes first | Real entitlements enforced server-side |
 | Redis-backed queue, multiple instances | No measured need; the seam is documented | Shared queue + presence, sticky sessions or a cross-process event bus, load tests first |
@@ -65,8 +65,12 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 7. **AI, if the owner wants it (not started).** The smallest first step is the read-only moderation
    assistant in D37: it reads the report evidence the owner already sees, proposes a category/severity,
    and never acts. It needs a provider choice, credentials, a data-processing decision, redaction,
-   timeouts, a cost cap and an audit trail. The opt-in, clearly labelled companion is a separate product
-   and must not be mixed into random human matching.
+   timeouts, a cost cap and an audit trail. The companion is a separate product under D38: a hidden
+   fallback only after real matching finds nobody, behind `aiCompanionEnabled`, receiving the user's
+   active search criteria so its persona fits them. It is never a queue participant and must not displace
+   a waiting human. The owner switches for autonomy and the companion already exist in `/admin` and are
+   off; before either can mean anything, the adapter, synthetic-peer marker, retention rule and
+   autonomous-ban audit must be built.
 
 ## Decisions needed from the owner
 

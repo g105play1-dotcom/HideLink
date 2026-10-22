@@ -60,7 +60,11 @@ export function buildHistory(chat: ChatRecord, viewerId: string): ChatMessageVie
  *  - someone leaving is "I left" for them and "the other person left" for the peer;
  *  - a block or a report is reported plainly to whoever triggered it, while the
  *    other side sees an ordinary "peer left". Telling someone they were blocked
- *    invites retaliation, and telling them they were reported is worse.
+ *    invites retaliation, so the end reason stays silent.
+ *
+ * A report is the one exception outside this function: the reported side receives a
+ * separate, evidence-free `report:warning` (D38), but their chat still ends as a plain
+ * `peer_left`. The warning is not a new end reason and does not say who reported them.
  */
 export function endedReasonFor(
   chat: ChatRecord,

@@ -110,6 +110,14 @@ model Identity {
   bannedAt     DateTime? @db.Timestamptz(3)
   bannedReason String?   @db.VarChar(200)
 
+  /// The last time a report named this identity, while its warning is still unread.
+  ///
+  /// Null means there is no notice to show. A new report overwrites the timestamp; the
+  /// person dismisses the warning with `POST /me/report-warning/read`, which clears it.
+  /// A single column is enough because the notice is a warning, not an inbox: reports
+  /// themselves are the durable record, and reporting is rare.
+  reportWarningAt DateTime? @db.Timestamptz(3)
+
   incomingRequests IncomingRequestPolicy @default(everyone)
 
   /// Legacy per-user switch, stored but no longer read.
@@ -534,6 +542,21 @@ model PlatformPolicy {
   /// removes an existing block: silently un-blocking somebody would be a safety
   /// regression, and the block list stays readable so it can be undone by hand.
   blockingEnabled Boolean @default(false)
+
+  /// Permission for an AI moderator to act without a human click (for example, a ban).
+  ///
+  /// Off by default. No AI provider is connected yet; the value is stored now so the
+  /// owner can make the policy decision before the adapter exists. A future AI action
+  /// path must read this switch on the server, not trust a flag sent by a model.
+  aiAutonomyEnabled Boolean @default(false)
+
+  /// Permission for an AI companion to stand in when random matching finds no human.
+  ///
+  /// Off by default and unused until a provider exists. The matching fallback is documented
+  /// in `docs/ARCHITECTURE.md`; the companion is presented as an ordinary peer by the
+  /// owner's decision (D38), which is why the server — not the browser — owns every
+  /// decision about it.
+  aiCompanionEnabled Boolean @default(false)
 
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 }

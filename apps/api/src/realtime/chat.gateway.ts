@@ -616,6 +616,10 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
         this.emitToUser(event.userId, 'friend:removed', { publicId: event.publicId });
         return;
 
+      case 'report.warning':
+        this.emitToUser(event.userId, 'report:warning', { reportedAt: event.reportedAt });
+        return;
+
       case 'identity.banned':
         // Tell the identity before closing the transport: a bare disconnect would look
         // like a network failure and the client would retry a session that can never work.

@@ -97,7 +97,11 @@ async function enableBlocking(token: string | undefined): Promise<void> {
   const updated = await fetch(`${TEST_API_BASE}/admin/platform`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', cookie },
-    body: JSON.stringify({ blockingEnabled: true }),
+    body: JSON.stringify({
+      blockingEnabled: true,
+      aiAutonomyEnabled: false,
+      aiCompanionEnabled: false,
+    }),
   });
   if (!updated.ok) throw new Error(`admin platform update failed: ${updated.status}`);
 }

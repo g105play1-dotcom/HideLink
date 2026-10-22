@@ -885,11 +885,11 @@ function ModerationPanel({
 }) {
   const queryClient = useQueryClient();
 
-  const setBlocking = useMutation({
-    mutationFn: (blockingEnabled: boolean) =>
+  const setPlatform = useMutation({
+    mutationFn: (next: AdminPlatformView) =>
       apiRequest<AdminPlatformView>('/admin/platform', {
         method: 'PUT',
-        json: { blockingEnabled },
+        json: next,
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'platform'] }),
   });
@@ -935,8 +935,10 @@ function ModerationPanel({
                 type="checkbox"
                 className="mt-0.5 size-4"
                 checked={platform.blockingEnabled}
-                disabled={setBlocking.isPending}
-                onChange={(event) => setBlocking.mutate(event.target.checked)}
+                disabled={setPlatform.isPending}
+                onChange={(event) =>
+                  setPlatform.mutate({ ...platform, blockingEnabled: event.target.checked })
+                }
               />
               <span>
                 <span className="font-medium">Разрешить блокировку собеседника</span>
@@ -954,7 +956,57 @@ function ModerationPanel({
             </label>
           ) : null}
 
-          {setBlocking.isError ? <ErrorLine error={setBlocking.error} /> : null}
+          {platform ? (
+            <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+              <p className="text-sm font-medium">ИИ</p>
+
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  aria-label="Разрешить ИИ самостоятельные действия"
+                  checked={platform.aiAutonomyEnabled}
+                  disabled={setPlatform.isPending}
+                  onChange={(event) =>
+                    setPlatform.mutate({ ...platform, aiAutonomyEnabled: event.target.checked })
+                  }
+                />
+                <span>
+                  <span className="font-medium">Разрешить ИИ самостоятельные действия</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    Когда ИИ будет подключён, разрешение позволит ему банить и снимать бан без
+                    подтверждения человека. Сейчас ИИ не подключён: сервер только хранит выбранную
+                    политику.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 size-4"
+                  aria-label="Разрешить ИИ-собеседника, если человек не найден"
+                  checked={platform.aiCompanionEnabled}
+                  disabled={setPlatform.isPending}
+                  onChange={(event) =>
+                    setPlatform.mutate({ ...platform, aiCompanionEnabled: event.target.checked })
+                  }
+                />
+                <span>
+                  <span className="font-medium">
+                    Разрешить ИИ-собеседника, если человек не найден
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    ИИ сможет занять место реального собеседника после неудачного поиска.
+                    Пользователю об этом не сообщается — так решено владельцем (D38). ИИ пока не
+                    подключён.
+                  </span>
+                </span>
+              </label>
+            </div>
+          ) : null}
+
+          {setPlatform.isError ? <ErrorLine error={setPlatform.error} /> : null}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
