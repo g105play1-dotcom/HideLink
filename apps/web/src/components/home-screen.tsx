@@ -112,7 +112,7 @@ export function HomeScreen() {
         ) : null}
 
         <main id="main" className="flex min-h-0 flex-1 flex-col gap-3">
-          {!reachable && !session ? (
+          {connection === 'rejected' || (!reachable && !session) ? (
             <UnavailableState
               title={t(connection === 'rejected' ? 'Доступ закрыт' : 'Нет связи с сервером')}
               detail={connectionDetail ?? bootError ?? t('Не удалось получить анонимную сессию.')}

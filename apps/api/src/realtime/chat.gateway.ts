@@ -616,14 +616,22 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
         this.emitToUser(event.userId, 'friend:removed', { publicId: event.publicId });
         return;
 
+      case 'identity.banned':
+        // Tell the identity before closing the transport: a bare disconnect would look
+        // like a network failure and the client would retry a session that can never work.
+        this.chat.handleBanned(event.userId);
+        this.emitToUser(event.userId, 'app:error', {
+          code: ErrorCode.IDENTITY_BANNED,
+          message: errorMessage(ErrorCode.IDENTITY_BANNED),
+        });
+        this.disconnectUser(event.userId);
+        return;
+
       case 'session.rotated':
         // The sockets on this identity are authenticated as a session that no longer
         // exists; close them so nothing can act with revoked credentials.
         this.emitToUser(event.previousUserId, 'session:rotated', { publicId: event.publicId });
-        for (const socketId of this.presence.socketIds(event.previousUserId)) {
-          const socket = this.server?.sockets.sockets.get(socketId);
-          socket?.disconnect(true);
-        }
+        this.disconnectUser(event.previousUserId);
         return;
     }
   }
@@ -645,6 +653,14 @@ export class ChatGateway implements OnModuleInit, OnModuleDestroy {
     const addresser = server as unknown as SocketAddresser;
     for (const socketId of this.presence.socketIds(userId)) {
       addresser.to(socketId).emit(event, payload);
+    }
+  }
+
+  /** Closes every socket of one identity. Used when its credential stops being valid. */
+  private disconnectUser(userId: string): void {
+    for (const socketId of this.presence.socketIds(userId)) {
+      const socket = this.server?.sockets.sockets.get(socketId);
+      socket?.disconnect(true);
     }
   }
 }

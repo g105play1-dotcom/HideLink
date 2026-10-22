@@ -137,7 +137,16 @@ class AnonymousClient {
     } catch (error) {
       const message = describeThrown(error);
       store.setBootError(message);
-      store.setConnection('offline', message);
+
+      // A banned identity is not a network failure: retrying with the same cookie can
+      // never succeed. Showing "Нет связи" would invite a retry loop; the "Доступ закрыт"
+      // state explains what the server actually decided.
+      if (error instanceof ApiError && error.code === ErrorCode.IDENTITY_BANNED) {
+        this.refused = true;
+        store.setConnection('rejected', message);
+      } else {
+        store.setConnection('offline', message);
+      }
     } finally {
       this.booting = false;
     }
@@ -717,6 +726,9 @@ class AnonymousClient {
       case ErrorCode.FORBIDDEN_ORIGIN:
       case ErrorCode.TOO_MANY_CONNECTIONS:
         this.refused = true;
+        // The transport is about to close and nothing on this screen can be used. Leaving
+        // the last conversation rendered would look like the chat survived the ban.
+        store.clearConversation();
         store.setConnection('rejected', describeError(payload, getActiveLocale()));
         return;
 

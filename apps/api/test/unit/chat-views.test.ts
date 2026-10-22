@@ -243,6 +243,17 @@ describe('endedReasonFor', () => {
     expect(endedReasonFor(chat, B, 'reported')).toBe('peer_left');
   });
 
+  it('never discloses a suspension to either side', () => {
+    const chat = randomChat();
+    chat.endedByUserId = A;
+
+    // The banned identity receives a fatal `IDENTITY_BANNED` error and is disconnected;
+    // its peer must see an ordinary end, exactly as with a block. The durable row also
+    // says `left`, so an archived transcript does not reveal the moderation action.
+    expect(endedReasonFor(chat, A, 'banned')).toBe('peer_left');
+    expect(endedReasonFor(chat, B, 'banned')).toBe('peer_left');
+  });
+
   it('tells the side that stayed that the other one dropped off', () => {
     const chat = randomChat();
     chat.endedByUserId = A;

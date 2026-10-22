@@ -4,6 +4,8 @@ import { ErrorCode } from './errors.js';
 import { PUBLIC_ID_PREFIX, isValidPublicId, normalizePublicId } from './ids.js';
 import {
   ABSOLUTE_MESSAGE_MAX_LENGTH,
+  ADMIN_BAN_REASON_MAX_LENGTH,
+  ADMIN_BAN_REASON_MIN_LENGTH,
   CLIENT_MESSAGE_ID_MAX_LENGTH,
   CONNECT_REQUEST_NOTE_MAX_LENGTH,
   MESSAGE_MIN_LENGTH,
@@ -238,6 +240,19 @@ export const adminReportParamsSchema = z.object({ id: z.uuid() }).strict();
  */
 export const adminReportUpdateSchema = z.object({ status: z.enum(REPORT_STATUSES) }).strict();
 
+/**
+ * REST: `POST /api/v1/admin/identities/:publicId/ban` body.
+ *
+ * The reason is required and bounded: a ban is a manual decision whose explanation should
+ * travel with it while it stands. Unbanning takes no body — it is the correction of a
+ * mistake, not a second decision that needs a justification.
+ */
+export const adminBanSchema = z
+  .object({
+    reason: z.string().trim().min(ADMIN_BAN_REASON_MIN_LENGTH).max(ADMIN_BAN_REASON_MAX_LENGTH),
+  })
+  .strict();
+
 export type AdminSessionInput = z.infer<typeof adminSessionSchema>;
 export type AdminIdentityQuery = z.infer<typeof adminIdentityQuerySchema>;
 export type ArchiveListQuery = z.infer<typeof archiveListQuerySchema>;
@@ -249,3 +264,4 @@ export type AdminPlatformInput = z.infer<typeof adminPlatformSchema>;
 export type AdminReportListQuery = z.infer<typeof adminReportListQuerySchema>;
 export type AdminReportParams = z.infer<typeof adminReportParamsSchema>;
 export type AdminReportUpdateInput = z.infer<typeof adminReportUpdateSchema>;
+export type AdminBanInput = z.infer<typeof adminBanSchema>;

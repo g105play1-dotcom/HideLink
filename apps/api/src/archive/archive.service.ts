@@ -21,6 +21,7 @@ import type { ChatRecord, StoredMessage } from '../chat/chat.registry.js';
 import { AppError } from '../common/app-error.js';
 import { log } from '../common/logger.js';
 import { DirectoryService } from '../directory/directory.service.js';
+import { ADMIN_IDENTITY_SELECT, toAdminIdentityView } from '../moderation/admin-identity.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 const POLICY_ID = 'default';
@@ -296,17 +297,28 @@ export class ArchiveService implements OnModuleInit {
     const normalized = normalizePublicId(query);
     if (!normalized.startsWith('AL') || normalized.length < 4) return [];
 
-    const rows = await this.prisma.identity.findMany({
-      where: { publicId: { startsWith: normalized } },
-      orderBy: { publicId: 'asc' },
-      take: Math.min(Math.max(1, limit), 50),
-      select: { publicId: true, createdAt: true },
+    const take = Math.min(Math.max(1, limit), 50);
+
+    // The exact match is fetched separately. With a short prefix and many identities, the
+    // owner could paste a complete User ID that sorts after the first page; a plain
+    // `startsWith` query would then answer "not found" for a person who exists. The exact
+    // row is also shown first, so the actionable person is not buried under prefix noise.
+    const exact = await this.prisma.identity.findUnique({
+      where: { publicId: normalized },
+      select: ADMIN_IDENTITY_SELECT,
     });
 
-    return rows.map((row) => ({
-      publicId: row.publicId,
-      createdAt: row.createdAt.toISOString(),
-    }));
+    const rows =
+      take > (exact ? 1 : 0)
+        ? await this.prisma.identity.findMany({
+            where: { publicId: { startsWith: normalized, not: normalized } },
+            orderBy: { publicId: 'asc' },
+            take: take - (exact ? 1 : 0),
+            select: ADMIN_IDENTITY_SELECT,
+          })
+        : [];
+
+    return (exact ? [exact, ...rows] : rows).map(toAdminIdentityView);
   }
 
   // ---------------------------------------------------------------------------

@@ -931,3 +931,95 @@ sent by the browser without server verification (a forged platform identity); a 
 or direct Prisma writes from a bot (two sources of truth and no shared blocks/limits); disabling
 `HttpOnly`/`SameSite` for all users to make one iframe work (a global security downgrade for a local
 problem).
+
+---
+
+## D36. A ban suspends the identity, not just its sessions; moderator accounts remain a future seam
+
+**Context.** `ModerationService.ban` existed but nothing called it: there was no owner endpoint, no
+control in `/admin`, and no test. It marked the identity and revoked its sessions. That last step looked
+safe but defeated the ban in an anonymous product: the next `POST /session` saw a revoked cookie as a
+stranger and issued a brand-new User ID, so pressing F5 escaped the suspension. The owner asked for a
+working ban now and explicitly deferred moderator accounts.
+
+**Decision.** The owner can search a User ID in `/admin` and suspend or restore it:
+
+- `POST /api/v1/admin/identities/:publicId/ban` takes a required reason (3–200 characters);
+  `DELETE /api/v1/admin/identities/:publicId/ban` lifts it. Both are behind `AdminGuard`, return the
+  updated `AdminIdentityView` (`banned`, `bannedAt`, `bannedReason`), and answer `USER_NOT_FOUND` for an
+  unknown ID. Unbanning is idempotent.
+- A ban is about the **identity**, not one session. Sessions are deliberately left in place: the request
+  guard and the socket handshake then recognise the identity and refuse it with `IDENTITY_BANNED`, while
+  the old cookie cannot silently turn into a new identity. A session that is already gone (expired or
+  cleared) still yields a new anonymous identity; that is the honest limitation of a product with no
+  registration, and it is stated in `docs/SECURITY.md`.
+- The in-memory chat domain is told through `AppEventBus` (`identity.banned`), never by importing the
+  gateway. The gateway ends an active chat, withdraws pending invitations, tells the banned sockets
+  `IDENTITY_BANNED` and closes them. The peer sees an ordinary `peer_left` end and is never told that a
+  suspension happened; the durable chat row records `left` because `ChatEndReason` is also a user-facing
+  vocabulary and has no `banned` value.
+- Friendships involving the identity are deleted in the same database transaction and their peers are
+  told through `friend.removed`. A banned person must not remain in a contact list with a "write" action
+  that can only fail.
+- `/admin` shows the ban state and reason in its identity search, and report cards link to the same
+  search so the owner can act on a complaint without copying an ID by hand.
+
+Moderator accounts are **not** built. `AdminGuard` remains the single owner boundary and every moderation
+action already goes through a service method; a future account system replaces that guard, attaches an
+actor, and adds an append-only audit table. Until then the shared `ADMIN_TOKEN` cannot attribute an
+action to a person, and the ban reason is the only explanation while the suspension stands. The ban
+endpoint is intentionally actor-agnostic so adding accounts does not change what a ban means.
+
+**Consequences.** The live tab closes immediately and a reload remains refused while the cookie lasts;
+unbanning restores access to the same User ID. There is still no per-moderator attribution, no audit of
+who lifted a ban, and no protection against a determined person clearing cookies. The UI says so rather
+than implying that a ban removes a human from the service.
+
+**Rejected.** Revoking sessions on ban (it hands the banned person a new identity on reload); deleting
+the identity (it would erase reports, blocks and the ability to unban); making the reason optional
+(then a suspension has no explanation and cannot be reviewed); leaving live sockets open (the ban would
+only affect future reconnects); disclosing the ban to the peer (it is a moderation action, not a message);
+adding moderator accounts now (no owner decision on roles, no audit trail, and a role without attribution
+is security theatre); per-moderator keys without accounts (more secrets to rotate, still no identity).
+
+---
+
+## D37. Neural networks are optional adapters: a human-confirmed moderation assistant first, a labelled companion later
+
+**Context.** The owner asked whether AI can act as a moderator and as an interlocutor. Both are feasible,
+but they are different products with different consent and privacy consequences. The chat domain currently
+has no provider SDK, no outbound network dependency and no place where a model output may become an
+authoritative decision.
+
+**Decision.** AI is integrated only through adapters and only in two separate modes:
+
+1. **Moderation assistant — first, read-only, human-confirmed.** It receives the same report evidence the
+   owner already sees (reason, user note, message snapshot, coarse metadata) and proposes a category and
+   severity. It cannot ban, block, delete, close a chat or answer a user. Every action remains an owner
+   click, and both the suggestion and the decision should be audited once an audit table exists. It runs
+   in `apps/api/src/integrations/ai/` behind a provider-agnostic interface (OpenAI-compatible HTTP and a
+   local-model option), with server-only credentials, strict timeouts, a token/cost cap, per-owner rate
+   limits and redaction of identifiers before any request leaves the process.
+2. **AI companion — later, opt-in and clearly labelled.** It is a distinct mode, not a participant in the
+   random human pool. The interface says it is an AI before the conversation starts; it cannot claim to
+   be a human, cannot receive a User ID or private profile data, and cannot be reached by the normal
+   `request:send` flow. Its transcripts follow their own retention rule and are never silently mixed into
+   the archive.
+
+Provider SDKs and provider payload types stay out of `packages/shared`, `packages/protocol`, `chat`,
+`friends` and `moderation`; an adapter translates to the existing domain operations. No provider code is
+written until the owner chooses a provider, supplies credentials and data-processing terms, and decides
+whether prompts may contain reported message text. Without those, a stub would be an untested network
+path with an unclear privacy story.
+
+**Consequences.** A moderator assistant is the smallest useful first step: it reduces the owner's reading
+load without transferring authority, and it exercises the adapter, redaction, timeout and audit seams.
+The companion is a product with its own consent and disclosure requirements, not a hidden bot in random
+matching. Neither feature makes the service production-ready or removes the need for human review.
+
+**Rejected.** An AI in the random queue presented as a human (deception, and it destroys the meaning of
+"random conversation"); autonomous AI bans (no appeal, no accountability, and prompt injection becomes a
+moderation bypass); sending whole archives or User IDs to a provider (unnecessary disclosure and a new
+retention surface); putting an OpenAI/VK/Telegram SDK in the chat domain (provider lock-in and an
+untestable domain); building the integration now without credentials or a data-processing decision (an
+unverifiable claim, not a feature).

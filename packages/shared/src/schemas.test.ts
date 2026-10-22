@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { OWNER_CONTACT_MAX_LENGTH, OWNER_MESSAGE_TOPICS } from './limits.js';
 import {
+  adminBanSchema,
   blockSchema,
   chatMessageSchema,
   connectRequestSchema,
@@ -140,5 +141,20 @@ describe('blockSchema / settingsSchema', () => {
   it('validates settings and rejects unknown policies', () => {
     expect(settingsSchema.safeParse({ incomingRequests: 'nobody' }).success).toBe(true);
     expect(settingsSchema.safeParse({ incomingRequests: 'sometimes' }).success).toBe(false);
+  });
+});
+
+describe('adminBanSchema', () => {
+  it('trims the reason and accepts the documented bounds', () => {
+    expect(adminBanSchema.parse({ reason: '  спам в чате  ' })).toEqual({ reason: 'спам в чате' });
+    expect(adminBanSchema.safeParse({ reason: 'abc' }).success).toBe(true);
+    expect(adminBanSchema.safeParse({ reason: 'x'.repeat(200) }).success).toBe(true);
+  });
+
+  it('rejects a too-short or too-long reason, and unknown fields', () => {
+    expect(adminBanSchema.safeParse({ reason: 'ab' }).success).toBe(false);
+    expect(adminBanSchema.safeParse({ reason: '   ' }).success).toBe(false);
+    expect(adminBanSchema.safeParse({ reason: 'x'.repeat(201) }).success).toBe(false);
+    expect(adminBanSchema.safeParse({ reason: 'спам', actor: 'moderator' }).success).toBe(false);
   });
 });

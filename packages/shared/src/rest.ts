@@ -113,10 +113,18 @@ export interface AdminStatusView {
   available: boolean;
 }
 
-/** One identity as the owner sees it. Deliberately minimal: an ID and a date. */
+/**
+ * One identity as the owner sees it: an ID, a date and the ban state the owner set.
+ *
+ * The reason is included so the owner can review a suspension without opening the
+ * database, and so unbanning is an informed action rather than a guess.
+ */
 export interface AdminIdentityView {
   publicId: string;
   createdAt: string;
+  banned: boolean;
+  bannedAt: string | null;
+  bannedReason: string | null;
 }
 
 export interface AdminIdentityListResponse {

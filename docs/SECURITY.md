@@ -217,10 +217,18 @@ would become a way to send a message).
 - A report ends the chat, takes its message snapshot from the server's own copy (never from client
   input), deletes any friendship with the reported peer in the same transaction, and is hard-deleted
   after `REPORT_RETENTION_DAYS`.
-- `ModerationService.ban` marks the identity, revokes all its sessions, and the guard then refuses it
-  everywhere. **Honest limitation:** banning an anonymous identity cannot outlast the identity. There
-  is no registration and no device fingerprint (deliberately), so a banned person who clears cookies
-  starts over. Bans are a speed bump for abuse, not a ban of a human, and no code claims otherwise.
+- The owner can suspend an identity from `/admin` (`POST`/`DELETE /api/v1/admin/identities/:publicId/ban`).
+  A ban requires a stored reason, is enforced by the request guard and the socket handshake on every
+  request, ends a live chat through the `identity.banned` event, closes the identity's sockets, and
+  deletes its friendships in the same transaction. Sessions are deliberately **not** revoked: a revoked
+  cookie would look like a stranger to `POST /session` and be exchanged for a brand-new User ID on the
+  next reload. Keeping the session lets the guard answer `IDENTITY_BANNED` instead. `apps/api/test/ban.test.ts`
+  and `tests/e2e/specs/admin.spec.ts` cover the action, the live tab and unbanning.
+  **Honest limitation:** banning an anonymous identity cannot outlast the identity. There is no
+  registration and no device fingerprint (deliberately), so a banned person who clears cookies starts
+  over. Bans are a speed bump for abuse, not a ban of a human, and no code claims otherwise. The shared
+  `ADMIN_TOKEN` also means a ban cannot yet be attributed to a particular moderator (`docs/DECISIONS.md`
+  D36).
 
 ## 10.1 Friendships
 
@@ -386,8 +394,8 @@ value can only mislead the owner's own reply.
 ### 13.2 Moderation panel
 
 The owner asked (2026-10-20, `docs/DECISIONS.md` D31) that blocking stop being a personal setting,
-that it ship **off**, and that reports — which users could already file — become readable. The panel
-is the third card on `/admin`, behind the same `AdminGuard` and therefore the same key as the archive
+that it ship **off**, and that reports — which users could already file — become readable. The panel is
+one of the cards on `/admin`, behind the same `AdminGuard` and therefore the same key as the archive
 and the inbox; with no `ADMIN_TOKEN` those routes do not exist.
 
 - **Blocking.** `PlatformPolicy` holds one row (`id = 'default'`) with `blockingEnabled`, default
@@ -400,14 +408,22 @@ and the inbox; with no `ADMIN_TOKEN` those routes do not exist.
   Reason, details, participants, chat id and the message snapshot are evidence and cannot be edited
   through the API. The list is capped by `limit` (default 50, maximum 200) so one request cannot read
   the whole table.
+- **Bans.** `POST /admin/identities/:publicId/ban` requires a 3–200 character reason;
+  `DELETE` lifts it. The identity is marked and the guard/handshake refuse it on every later request.
+  Sessions are **not** revoked, because a revoked cookie would be exchanged for a fresh User ID on the
+  next `POST /session`; the trade-off is documented in D36. Live sockets receive `IDENTITY_BANNED` and
+  are closed, an active chat ends for the peer as an ordinary `peer_left`, and friendships are deleted
+  in the same transaction. Only `bannedAt`/`bannedReason` are stored; there is no free-text accusation
+  beyond the owner's own reason.
 - **What is exposed.** Reports are plaintext in PostgreSQL and readable by anyone who obtains
-  `ADMIN_TOKEN`. There is no per-moderator identity, no second factor and no audit trail of who
-  changed a status; with one owner the only possible "who" is the owner himself. This is listed as a
-  gap in §14.
+  `ADMIN_TOKEN`. There is no per-moderator identity, no second factor and no audit trail of who changed
+  a status or issued a ban; with one owner the only possible "who" is the owner himself. This is listed
+  as a gap in §14.
 - **What is not exposed.** The panel is not reachable from the user application; the report form does
   not reveal the peer's User ID in a random chat, and the report response to the reporter contains
   only an id. Report text is rendered as text by React (no HTML), so a hostile reporter cannot inject
-  markup into the owner's page.
+  markup into the owner's page. A banned person is not told anything about the reporter or the peer;
+  the peer is not told that a ban happened.
 
 ## 14. Known gaps and what must happen before a public deployment
 

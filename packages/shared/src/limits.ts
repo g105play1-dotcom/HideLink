@@ -34,6 +34,16 @@ export const FRIEND_REQUEST_TTL_MS = 60_000;
  */
 export const FRIEND_LIST_LIMIT = 200;
 
+/**
+ * Bounds of the note the owner writes when banning an identity.
+ *
+ * A reason is mandatory rather than optional: a ban is a manual, irreversible-looking
+ * decision, and "why" is the only part of it that can later be reviewed. The upper bound
+ * matches `Identity.bannedReason` (`VarChar(200)`).
+ */
+export const ADMIN_BAN_REASON_MIN_LENGTH = 3;
+export const ADMIN_BAN_REASON_MAX_LENGTH = 200;
+
 /** How long an idle matching ticket may stay in the queue before it is dropped. */
 export const MATCH_TICKET_TTL_MS = 5 * 60_000;
 

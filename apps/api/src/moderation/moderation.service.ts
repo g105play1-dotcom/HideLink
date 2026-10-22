@@ -1,24 +1,30 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type {
-  AdminReportView,
-  BlockedUserView,
-  IncomingRequestPolicy,
-  ReportReason,
-  ReportStatus,
+import {
+  ADMIN_BAN_REASON_MAX_LENGTH,
+  type AdminIdentityView,
+  type AdminReportView,
+  type BlockedUserView,
+  type IncomingRequestPolicy,
+  type ReportReason,
+  type ReportStatus,
 } from '@anonlink/shared';
 
 import { APP_CONFIG, type AppConfig } from '../config/env.js';
 import { newReportId } from '../common/ids.js';
 import { log } from '../common/logger.js';
 import { DirectoryService } from '../directory/directory.service.js';
+import { AppEventBus } from '../events/app-events.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ADMIN_IDENTITY_SELECT, toAdminIdentityView } from './admin-identity.js';
 
 /**
- * Durable moderation state: blocks, abuse reports and coarse security events.
+ * Durable moderation state: blocks, abuse reports, identity suspensions and coarse
+ * security events.
  *
- * This service owns *only* database work and the in-memory block cache. It has no
- * knowledge of chats or sockets, which is what keeps the module graph acyclic:
- * the chat layer depends on moderation, never the other way round.
+ * This service owns database work, the in-memory block cache and the suspension bit.
+ * It has no knowledge of chats or sockets, which is what keeps the module graph acyclic:
+ * the chat layer depends on moderation, never the other way round. A suspension publishes
+ * `identity.banned`; the gateway decides what that means for live sockets.
  */
 
 export interface ReportInput {
@@ -39,14 +45,14 @@ export type SecurityEventType =
   | 'contact_disabled'
   | 'contact_offline'
   | 'chat_blocked'
-  | 'report_created'
-  | 'identity_banned';
+  | 'report_created';
 
 @Injectable()
 export class ModerationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly directory: DirectoryService,
+    private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -236,26 +242,110 @@ export class ModerationService {
     };
   }
 
+  /** One identity in the shape the owner's panel renders. */
+  async findAdminIdentity(publicId: string): Promise<AdminIdentityView | null> {
+    const row = await this.prisma.identity.findUnique({
+      where: { publicId },
+      select: ADMIN_IDENTITY_SELECT,
+    });
+    return row ? toAdminIdentityView(row) : null;
+  }
+
+  /**
+   * Suspends an identity by its public User ID, returning its new state.
+   *
+   * `null` means the User ID does not exist; the caller turns that into the same
+   * `USER_NOT_FOUND` the public lookup uses.
+   */
+  async banByPublicId(publicId: string, reason: string): Promise<AdminIdentityView | null> {
+    const row = await this.prisma.identity.findUnique({
+      where: { publicId },
+      select: { id: true },
+    });
+    if (!row) return null;
+
+    await this.ban(row.id, reason);
+    return this.findAdminIdentity(publicId);
+  }
+
+  /** Lifts a suspension. Idempotent: unbanning an active identity is not an error. */
+  async unbanByPublicId(publicId: string): Promise<AdminIdentityView | null> {
+    const row = await this.prisma.identity.findUnique({
+      where: { publicId },
+      select: { id: true },
+    });
+    if (!row) return null;
+
+    await this.unban(row.id);
+    return this.findAdminIdentity(publicId);
+  }
+
   /**
    * Suspends an identity.
    *
-   * Operator/server-side only — there is no endpoint that exposes it. Note the
-   * honest limitation: banning an *anonymous* identity cannot be more durable than
-   * the identity itself, and a user who cleared their cookie simply gets a new one.
-   * See docs/SECURITY.md.
+   * ## Sessions are deliberately *not* revoked
+   *
+   * A ban is about the identity, not about one session. If the sessions were revoked, the
+   * next `POST /session` would look like a stranger and mint a brand-new User ID — the
+   * banned person would escape by pressing F5. Leaving the sessions in place means the
+   * guard recognises the identity on every request and answers `IDENTITY_BANNED`; the
+   * existing browser stays banned until its cookie is cleared or the session expires.
+   * That is still not a ban of a *human* (see docs/SECURITY.md), but it is the strongest
+   * promise an anonymous product can keep.
+   *
+   * The live sockets are closed through `identity.banned`; the gateway owns sockets and
+   * this service must not import it. Friendships are deleted in the same transaction:
+   * a banned person must not remain in someone's contact list with a "write" action that
+   * can only fail.
    */
   async ban(userId: string, reason: string): Promise<void> {
-    await this.prisma.identity.update({
-      where: { id: userId },
-      data: { bannedAt: new Date(), bannedReason: reason.slice(0, 200) },
-    });
-    await this.prisma.session.updateMany({
-      where: { identityId: userId, revokedAt: null },
-      data: { revokedAt: new Date() },
+    const friendships = await this.prisma.friendship.findMany({
+      where: { OR: [{ userIdA: userId }, { userIdB: userId }] },
+      select: {
+        userIdA: true,
+        userIdB: true,
+        userA: { select: { publicId: true } },
+        userB: { select: { publicId: true } },
+      },
     });
 
+    const removedFor = friendships.map((row) =>
+      row.userIdA === userId
+        ? { userId: row.userIdB, publicId: row.userA.publicId }
+        : { userId: row.userIdA, publicId: row.userB.publicId },
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.identity.update({
+        where: { id: userId },
+        data: { bannedAt: new Date(), bannedReason: reason.slice(0, ADMIN_BAN_REASON_MAX_LENGTH) },
+      }),
+      this.prisma.friendship.deleteMany({
+        where: { OR: [{ userIdA: userId }, { userIdB: userId }] },
+      }),
+    ]);
+
     this.directory.patch(userId, { banned: true });
+
+    for (const peer of removedFor) {
+      this.bus.emit({ type: 'friend.removed', userId: peer.userId, publicId: peer.publicId });
+    }
+    // The gateway ends any live chat and closes the sockets. The event carries no reason:
+    // the peer must not learn that the other side was suspended.
+    this.bus.emit({ type: 'identity.banned', userId });
+
     log.security('identity.banned', {});
+  }
+
+  /** Lifts a suspension. The identity's sessions were never revoked, so it can return. */
+  async unban(userId: string): Promise<void> {
+    const result = await this.prisma.identity.updateMany({
+      where: { id: userId, bannedAt: { not: null } },
+      data: { bannedAt: null, bannedReason: null },
+    });
+
+    this.directory.patch(userId, { banned: false });
+    if (result.count > 0) log.security('identity.unbanned', {});
   }
 
   // ---------------------------------------------------------------------------

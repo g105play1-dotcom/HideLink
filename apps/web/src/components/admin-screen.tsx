@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  ADMIN_BAN_REASON_MAX_LENGTH,
+  ADMIN_BAN_REASON_MIN_LENGTH,
   ARCHIVE_RETENTION_MAX_DAYS,
   ErrorCode,
   GENDERS,
@@ -8,6 +10,7 @@ import {
   MEDIA_KINDS,
   REPORT_STATUSES,
   type AdminIdentityListResponse,
+  type AdminIdentityView,
   type AdminPlatformView,
   type AdminReportListResponse,
   type AdminReportView,
@@ -26,6 +29,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArchiveRestore,
+  Ban,
   CircleAlert,
   Eraser,
   Flag,
@@ -35,7 +39,9 @@ import {
   LogOut,
   ShieldCheck,
   Trash2,
+  UserCheck,
   UserPlus,
+  UserX,
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
@@ -330,6 +336,18 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
   });
 
   const [openChatId, setOpenChatId] = useState<string | null>(null);
+  const [accessSearch, setAccessSearch] = useState('');
+
+  const focusAccessSearch = (publicId: string) => {
+    setAccessSearch(publicId);
+    // The input is already mounted; scroll and focus after React has rendered the value,
+    // so the owner can type the reason without hunting for the panel.
+    requestAnimationFrame(() => {
+      const input = document.getElementById('access-user-search');
+      input?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      input?.focus();
+    });
+  };
 
   // Signing out and re-entering the key both have to drop the cached policy, because the
   // screen above decides between the key form and this panel by whether that query
@@ -411,7 +429,10 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
         reports={reports.data?.reports ?? []}
         reportsLoading={reports.isPending}
         reportsError={reports.isError ? reports.error : null}
+        onBanTarget={focusAccessSearch}
       />
+
+      <UserAccessPanel search={accessSearch} onSearchChange={setAccessSearch} />
 
       <OwnerInbox
         messages={inbox.data?.messages ?? []}
@@ -852,6 +873,7 @@ function ModerationPanel({
   reports,
   reportsLoading,
   reportsError,
+  onBanTarget,
 }: {
   platform: AdminPlatformView | null;
   platformLoading: boolean;
@@ -859,6 +881,7 @@ function ModerationPanel({
   reports: readonly AdminReportView[];
   reportsLoading: boolean;
   reportsError: unknown;
+  onBanTarget: (publicId: string) => void;
 }) {
   const queryClient = useQueryClient();
 
@@ -993,6 +1016,15 @@ function ModerationPanel({
                       ))}
                     </select>
                   </label>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onBanTarget(report.targetPublicId)}
+                  >
+                    <Ban className="size-4" aria-hidden="true" />
+                    Найти для бана
+                  </Button>
                 </div>
 
                 {report.details ? (
@@ -1022,6 +1054,195 @@ function ModerationPanel({
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function UserAccessPanel({
+  search,
+  onSearchChange,
+}: {
+  search: string;
+  onSearchChange: (value: string) => void;
+}) {
+  const found = useQuery({
+    queryKey: ['admin', 'identities', search],
+    queryFn: () =>
+      apiRequest<AdminIdentityListResponse>(
+        `/admin/identities?q=${encodeURIComponent(search.trim())}`,
+      ),
+    enabled: search.trim().length >= 4,
+    retry: false,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <UserX className="size-4" aria-hidden="true" />
+          Доступ пользователей
+        </CardTitle>
+        <CardDescription>
+          Найдите анонимный User ID и приостановите его доступ. Причина обязательна: она видна вам,
+          пока бан действует.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-4">
+        <label className="flex flex-col gap-1 text-sm" htmlFor="access-user-search">
+          Найти пользователя по User ID
+          <Input
+            id="access-user-search"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="AL…"
+            autoComplete="off"
+          />
+        </label>
+
+        {search.trim().length > 0 && search.trim().length < 4 ? (
+          <p className="text-xs text-muted-foreground">Введите минимум 4 символа.</p>
+        ) : null}
+
+        {found.isFetching ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Ищу…
+          </p>
+        ) : null}
+
+        {found.isError ? <ErrorLine error={found.error} /> : null}
+
+        {found.isSuccess && found.data.identities.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Никого не найдено.</p>
+        ) : null}
+
+        {found.isSuccess && found.data.identities.length > 0 ? (
+          <ul className="flex flex-col gap-3" aria-label="Найденные пользователи">
+            {found.data.identities.map((identity) => (
+              <BanIdentityRow key={identity.publicId} identity={identity} />
+            ))}
+          </ul>
+        ) : null}
+
+        <p className="text-xs text-muted-foreground">
+          Бан действует на этот User ID и его текущие сессии: перезагрузка не помогает, пока cookie
+          цела. Очистка cookie создаёт новую анонимную личность — это ограничение анонимности, а не
+          ошибка. Дружбы с забаненным ID удаляются.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BanIdentityRow({ identity }: { identity: AdminIdentityView }) {
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState('');
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'identities'] });
+
+  const ban = useMutation({
+    mutationFn: () =>
+      apiRequest<AdminIdentityView>(
+        `/admin/identities/${encodeURIComponent(identity.publicId)}/ban`,
+        { method: 'POST', json: { reason: reason.trim() } },
+      ),
+    onSuccess: invalidate,
+  });
+
+  const unban = useMutation({
+    mutationFn: () =>
+      apiRequest<AdminIdentityView>(
+        `/admin/identities/${encodeURIComponent(identity.publicId)}/ban`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: invalidate,
+  });
+
+  const trimmedReason = reason.trim();
+  const canBan =
+    trimmedReason.length >= ADMIN_BAN_REASON_MIN_LENGTH &&
+    trimmedReason.length <= ADMIN_BAN_REASON_MAX_LENGTH;
+
+  return (
+    <li className="rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <code className="font-mono text-sm">{identity.publicId}</code>
+          <Badge variant={identity.banned ? 'destructive' : 'success'}>
+            {identity.banned ? 'Заблокирован' : 'Активен'}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            создан {formatTimestamp(identity.createdAt)}
+          </span>
+        </span>
+      </div>
+
+      {identity.banned ? (
+        <div className="mt-3 flex flex-col gap-2">
+          <p className="text-sm">
+            <span className="text-muted-foreground">Причина: </span>
+            {identity.bannedReason ?? 'не указана'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Забанен {formatTimestamp(identity.bannedAt)}
+          </p>
+          <div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={unban.isPending}
+              onClick={() => unban.mutate()}
+            >
+              {unban.isPending ? (
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <UserCheck className="size-4" aria-hidden="true" />
+              )}
+              Разбанить
+            </Button>
+          </div>
+          {unban.isError ? <ErrorLine error={unban.error} /> : null}
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-col gap-2">
+          <label
+            className="flex flex-col gap-1 text-sm"
+            htmlFor={`ban-reason-${identity.publicId}`}
+          >
+            Причина бана
+            <Input
+              id={`ban-reason-${identity.publicId}`}
+              aria-label={`Причина бана ${identity.publicId}`}
+              value={reason}
+              maxLength={ADMIN_BAN_REASON_MAX_LENGTH}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Например: оскорбления после жалобы"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={ban.isPending || !canBan}
+              onClick={() => ban.mutate()}
+            >
+              {ban.isPending ? (
+                <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Ban className="size-4" aria-hidden="true" />
+              )}
+              Забанить
+            </Button>
+            {trimmedReason.length > 0 && !canBan ? (
+              <span className="text-xs text-muted-foreground">
+                Причина: от {ADMIN_BAN_REASON_MIN_LENGTH} до {ADMIN_BAN_REASON_MAX_LENGTH} символов.
+              </span>
+            ) : null}
+          </div>
+          {ban.isError ? <ErrorLine error={ban.error} /> : null}
+        </div>
+      )}
+    </li>
   );
 }
 

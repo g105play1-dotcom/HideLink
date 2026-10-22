@@ -148,3 +148,65 @@ An integration is not "ready" because a bot answers. It needs:
 - an E2E or platform-simulator test for the hosted mode, with the same two-independent-context
   discipline as `tests/e2e`;
 - a written note about what the platform itself can read, retain and moderate, in `docs/SECURITY.md`.
+
+## AI providers (planned, not implemented)
+
+AI is a different integration from a social network: no external account is linked, but text may leave
+the process. `docs/DECISIONS.md` D37 fixes the boundary. Two products are possible and must not be
+confused:
+
+### 1. Moderation assistant — the first step
+
+The owner opens a report in `/admin` and asks for a suggestion. The server sends **only the evidence the
+owner can already see**: report reason, the reporter's note, the server-taken message snapshot, timestamps
+and coarse category/age information if the owner already has it. It must not send User IDs, session
+tokens, blocks, friendships, IP/user-agent hashes or unrelated transcripts. The response is a proposed
+category, severity and short explanation.
+
+The assistant is **read-only and human-confirmed**. It cannot call `ModerationService.ban`, change a
+report status, delete an archive or send a message. The panel shows the suggestion next to the existing
+controls; the owner still performs every action. Once an audit table exists, store the model name, a
+hash/length of the input, the suggested category and the owner's final decision — not the full prompt.
+
+Proposed shape:
+
+```
+apps/api/src/integrations/ai/
+  ai-provider.ts        provider-agnostic interface (classifyReport, complete)
+  openai-compatible.ts  HTTP adapter; base URL + model from env
+  local.ts              optional local model, same interface
+  redact.ts             strips User IDs, ids, tokens, URLs and long digit runs
+  ai.service.ts         timeout, cost cap, per-owner rate limit, audit hook
+```
+
+Configuration belongs in `apps/api/src/config/env.ts`, `.env.example` and `docs/SECURITY.md`:
+`AI_ENABLED` (off by default), `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY` (server-only), `AI_TIMEOUT_MS`,
+`AI_MAX_INPUT_CHARS`, `AI_MONTHLY_BUDGET_USD` (or a token cap). No variable may be exposed to the browser.
+
+### 2. AI companion — later, labelled and opt-in
+
+A companion is a separate entry point, not a participant in random human matching. Before the first
+message the interface says it is an AI; it cannot claim to be a human, receive a User ID or profile data,
+or be reached through `request:send`. Its transcripts follow a separate retention rule and are never
+silently written into the human archive. The chat domain should see it as a distinct `ChatKind`/adapter,
+not as a fake peer with a hidden flag.
+
+### Abuse, privacy and failure rules
+
+- The server is the authority: prompt output cannot create a chat, bypass a block, receive a report or
+  change a rate limit.
+- Per-owner and per-identity rate limits; strict timeout; bounded input and output; a cost ceiling that
+  fails closed (no request rather than an unbounded one).
+- Provider errors are logged without bodies and surfaced to the owner as "suggestion unavailable", never
+  as a moderation result.
+- Prompt injection is expected: the model only suggests; every action remains a click.
+- Data-processing terms, provider retention and the country of processing are owner decisions. Until
+  they exist, the feature stays disabled and no transcript is sent anywhere.
+
+### Verification when it is built
+
+Unit tests for redaction, input bounds and the adapter's timeout/error mapping; API tests proving the
+assistant cannot ban or change a report and that a disabled `AI_ENABLED` refuses the route; a test that
+no User ID or session token appears in the adapter payload; an E2E test where the owner receives a
+suggestion and still has to press the real action. The AI companion needs its own disclosure and
+consent tests, and must never appear in the random human queue.

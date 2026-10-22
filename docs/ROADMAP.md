@@ -19,7 +19,7 @@ not.
 | **I. Growth preparation** | Redis seam, media seam, monetisation readiness, deployment sketch | **Partly done, on purpose.** Seams and documentation exist; no second instance, no media, no ads, no payments. |
 | **J. Owner archive** | Owner-only storage of conversations, off by default, scope/content/retention chosen by hand (owner decision 2026-10-19) | **Done.** `DECISIONS.md` D21, `SECURITY.md` §13, `archive.test.ts`; the page at `/admin` is covered by `admin.spec.ts`. |
 | **K. Contact the owner** | A form with subsections (жалобы, предложения, реклама, сотрудничество, …) writing into an owner-only inbox with a retention deadline (owner request 2026-10-19) | **Done.** `DECISIONS.md` D26, `SECURITY.md` §13.1, `owner-messages.test.ts`, `contact-owner.spec.ts`; the inbox is rendered on the same `/admin` page as the archive. |
-| **L. Moderation** | Reports readable and actionable by the owner; blocking is a platform switch, **off** by default (owner request 2026-10-20) | **Panel done, accounts not.** `DECISIONS.md` D31, `SECURITY.md` §13.2, `platform.test.ts`, `moderation.test.ts`, `moderation.spec.ts`. No moderator accounts and no ban endpoint yet; the shared key means no per-person audit. |
+| **L. Moderation** | Reports readable and actionable by the owner; blocking is a platform switch, **off** by default; a working ban of a User ID (owner request 2026-10-20/21) | **Panel and ban done, accounts not.** `DECISIONS.md` D31 and D36, `SECURITY.md` §10, `platform.test.ts`, `moderation.test.ts`, `ban.test.ts`, `moderation.spec.ts`, the ban journey in `admin.spec.ts`. Moderator accounts and per-person audit are still missing; the shared key cannot attribute a ban. |
 
 ## Verified by automation
 
@@ -34,7 +34,8 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
 | Media (photos, video, voice) | Excluded from the MVP by the brief | Upload storage, moderation, per-message type in the protocol (the message shape already allows it, and the archive already has inert `storeMedia`/`mediaKind` fields waiting for it) |
 | VK / Telegram integration | The owner plans it, but no provider credentials, account-linking decision or platform review exists yet | A provider-verified `ExternalIdentity` link, optional bearer-token bootstrap for cookie-less embeds, adapters under `apps/api/src/integrations/` and `apps/web/src/integrations/`, secrets, retention/unlink policy, and platform moderation mapping. Seam: `docs/INTEGRATIONS.md`, D35 |
 | Chat archive *encryption and audit* | The archive itself is built (D21); protecting it further is separate work | Encryption at rest (a volume or a key outside the process), an audit trail of owner actions, and a rehearsed restore that treats transcripts as the sensitive asset |
-| Moderation *accounts* and ban action | The report panel and the platform switch exist (D31), but a second person with the key would be indistinguishable from the owner | A moderator account model, per-person audit trail and a guarded ban endpoint; the panel is already the place they would live |
+| AI moderator assistant / AI companion | The owner asked whether AI can moderate or chat; both are plausible, but neither provider nor data-processing terms are chosen. D37 fixes the boundary: assistant is human-confirmed and read-only, companion is opt-in and labelled | A provider-agnostic adapter under `apps/api/src/integrations/ai/`, server-only credentials, redaction, timeouts/cost caps, an audit trail, separately disclosed retention, and an explicit owner decision on provider and autonomy |
+| Moderation *accounts* and per-person audit | The report panel, blocking switch and ban endpoint exist (D31, D36), but a second person with the key would be indistinguishable from the owner | A moderator account model, an append-only audit trail, and an `AdminGuard` replacement that attaches the actor; ban semantics do not need to change |
 | Ads / Premium | Brief forbids fake monetisation; core chat comes first | Real entitlements enforced server-side |
 | Redis-backed queue, multiple instances | No measured need; the seam is documented | Shared queue + presence, sticky sessions or a cross-process event bus, load tests first |
 | Load/soak testing, monitoring, backups | Requires a target environment; not possible to claim from localhost | A deployment, an observability stack, and a restore rehearsal |
@@ -61,6 +62,11 @@ covers are in `docs/TESTING.md`; requirement-by-requirement status is in `docs/C
    seam and checklist are in `docs/INTEGRATIONS.md` (D35). The chat itself does not need to change to
    prepare for this; an adapter needs `ExternalIdentity`, server-side proof verification, optional
    bearer bootstrap and provider secrets.
+7. **AI, if the owner wants it (not started).** The smallest first step is the read-only moderation
+   assistant in D37: it reads the report evidence the owner already sees, proposes a category/severity,
+   and never acts. It needs a provider choice, credentials, a data-processing decision, redaction,
+   timeouts, a cost cap and an audit trail. The opt-in, clearly labelled companion is a separate product
+   and must not be mixed into random human matching.
 
 ## Decisions needed from the owner
 

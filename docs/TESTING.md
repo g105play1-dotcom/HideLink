@@ -25,24 +25,24 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 6 | **95** | pure unit |
+| `packages/shared` | 6 | **97** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 16 | **187** | 34 unit + 153 integration |
-| `tests/e2e` | 13 | **34** | browser, two independent contexts |
-| **Total** | **36** | **324** | |
+| `apps/api` | 17 | **190** | 35 unit + 155 integration |
+| `tests/e2e` | 13 | **35** | browser, two independent contexts |
+| **Total** | **37** | **330** | |
 
-`apps/api` unit files (`test/unit/chat-views.test.ts` 16, `test/unit/rate-limit.test.ts` 10,
-`test/unit/platform.test.ts` 3, `test/friend-requests.test.ts` 5) run without a server; the twelve
+`apps/api` unit files (`test/unit/chat-views.test.ts` 17, `test/unit/rate-limit.test.ts` 10,
+`test/unit/platform.test.ts` 3, `test/friend-requests.test.ts` 5) run without a server; the thirteen
 integration files start a **real API process on port 3101** against the `*_test` database.
 
-**Last full run (2026-10-21, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `34 passed`. The browser suite
+**Last full run (2026-10-22, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `35 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
 under §5.
 
 ## 3. Unit suites
 
-**`packages/shared` (95)** — the rules both ends depend on, so they are tested once, here:
+**`packages/shared` (97)** — the rules both ends depend on, so they are tested once, here:
 
 - `languages.test.ts` (3) — the generated vocabulary has a name in every language, no duplicate
   codes or native names, and a widened code (`ja`) is accepted while an unknown one (`xx`) is not.
@@ -56,9 +56,10 @@ under §5.
   cities and regions (an **or** across all three lists, and never the searcher's own declaration).
 - `ids.test.ts` (18) — `generatePublicId` shape (`AL` + 12 Crockford Base32), `normalizePublicId`
   accepting look-alikes (`O`→`0`, `I`/`L`→`1`, case), `isValidPublicId` rejecting malformed input.
-- `schemas.test.ts` (19) — every Zod input contract, including the age-range `.refine`, unknown-field
-  rejection, the message-length ceiling, and the "contact the owner" body (topic vocabulary, blank
-  text, over-long contact line, and the `publicId` a body must not be able to carry).
+- `schemas.test.ts` (21) — every Zod input contract, including the age-range `.refine`, unknown-field
+  rejection, the message-length ceiling, the 3–200 character ban reason (trimmed, required, no extra
+  actor field), and the "contact the owner" body (topic vocabulary, blank text, over-long contact
+  line, and the `publicId` a body must not be able to carry).
 - `archive.test.ts` (13) — the owner's policy: `archivePolicySchema`'s cross-field rules (enabling
   requires something to store; `criteria` requires at least one criterion; `selected` requires at
   least one ID; `ageMin ≤ ageMax`), `archiveSubjectMatches` treating an undeclared attribute as no
@@ -67,9 +68,10 @@ under §5.
 **`packages/protocol` (8)** — `PROTOCOL_VERSION` and the exact client/server event-name maps, so a
 renamed event cannot silently ship.
 
-**`apps/api/test/unit` (29)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
+**`apps/api/test/unit` (30)** — `ChatRecord`/view logic (`chat-views`: per-recipient `from: 'you' |
 'peer'`, dedup by `clientMessageId` scoped per sender, bounded history, `endedReasonFor`
-asymmetries), the token-bucket limiter (`rate-limit`: burst, continuous refill, per-key
+asymmetries including a ban that looks like an ordinary `peer_left` to both sides), the token-bucket
+limiter (`rate-limit`: burst, continuous refill, per-key
 independence, idle-key eviction, bounded key budget) and the platform policy default (`platform`:
 the cached value starts `false`, a missing `PlatformPolicy` row means `false` after a reload, and a
 stored `true` is adopted). `friend-requests.test.ts` (5) lives in the same harness but exercises only
@@ -92,9 +94,10 @@ Each file below runs against the live process; the descriptions are the guarante
 | `persistence.test.ts` | 8 | Chat start/end persisted with no message content, no text column on `ChatSession`, exactly one copy of the reported message, only a token hash stored, identity kept on ID rotation, no contact columns, durable block, coarse security events; it also refuses to run against a database that is not `*_test` or whose archive is not empty, so its "nothing is stored" claims describe a default installation |
 | `search-filters.test.ts` | 12 | Filters really steer *server* matching (exclude then match the compatible peer), undeclared never satisfies, age-from-birthYear, place folding, a named city or region (an **or**), a declared country code, shared-language, **no widening while the timing policy is off**; inverted range rejected without touching saved filters, age floor/unknown language/unknown country/unknown fields rejected, profile round-trip (including country) never exposed to another user; multi-place round-trip |
 | `archive.test.ts` | 13 | The owner surface is closed without the key (401 `ADMIN_AUTH_REQUIRED`), the key exchanges for an `HttpOnly`+`SameSite=Strict` cookie, `/admin/status` answers without a key, identity search by full ID and prefix, **nothing is stored while the switch is off**, a chat covered by `everyone` is stored in order with senders and an expiry, switching the switch off mid-conversation stops recording, `criteria` archives a declared person and not one who declared nothing, `selected` archives exactly the chosen IDs, an unknown ID in the selected list is refused without half-applying, deleting one transcript, deleting by expiry (the same query the sweep runs), and `delete-all` needing an explicit confirmation |
-| `protocol.test.ts` | 10 | The eleven client events are declared and each is routed to a handler |
+| `protocol.test.ts` | 12 | The eleven client events are declared and each is routed to a handler |
 | `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
 | `friends.test.ts` | 13 | A friendship appears only after acceptance and then shows each side the other User ID; the second person pressing "add friend" accepts instead of creating a second request; a decline closes the chat and refuses further requests; the requester cannot answer their own request and a failed answer does not consume it; a foreign/unknown chat is refused; ending the chat cancels the pending question for both; `session:ready` restores an incoming/outgoing request and an existing friendship after a reload; a new direct chat with a friend announces that friendship in `chat:started` for both clients; removal is one-sided, notifies the other side and is idempotent; a list is per caller; block, report and identity rotation sever the link (rotation silently) |
+| `ban.test.ts` | 2 | The owner ban requires the key, a reason of 3–200 characters and an existing User ID; suspending a live identity closes its socket with `IDENTITY_BANNED`, ends its chat for the peer as an ordinary `peer_left`, deletes the friendship and notifies the peer, refuses the same cookie on `POST /session` instead of minting a new identity, and unbanning restores that same User ID and session |
 
 Two deliberate test-environment switches make these deterministic and are the reason some behaviours
 are *not* covered here (`apps/api/test/support/test-env.ts`): `MATCH_RELAX_AFTER_MS=0` and
@@ -124,7 +127,7 @@ exactly one, non-secret, machine-independent way.
 | `errors.spec.ts` | 3 | Malformed ID rejected locally; unknown ID reported as not found; a second lookup replacing the first |
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
-| `admin.spec.ts` | 3 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept |
+| `admin.spec.ts` | 4 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept. The fourth journey bans a User ID with a reason: the row turns "Заблокирован", the live tab shows "Доступ закрыт", and after "Разбанить" the same tab reconnects as the same User ID |
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
 | `moderation.spec.ts` | 3 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, and the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload; a user blocks the peer through the chat dialog and the person appears in the bottom-right block list beside the friends list, stays there and remains removable after the owner switches new blocks off, without a policy notice in the settings |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |

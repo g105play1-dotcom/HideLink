@@ -15,6 +15,7 @@ import {
   archiveListQuerySchema,
   archiveParamsSchema,
   archivePolicySchema,
+  adminBanSchema,
   adminConfirmSchema,
   adminIdentityQuerySchema,
   adminPlatformSchema,
@@ -23,9 +24,12 @@ import {
   adminReportUpdateSchema,
   ownerMessageListQuerySchema,
   ownerMessageParamsSchema,
+  userLookupParamsSchema,
+  type AdminBanInput,
   type AdminConfirmInput,
   type AdminIdentityListResponse,
   type AdminIdentityQuery,
+  type AdminIdentityView,
   type AdminPlatformInput,
   type AdminPlatformView,
   type AdminReportListQuery,
@@ -143,6 +147,34 @@ export class AdminController {
     @Query(zodQuery(adminIdentityQuerySchema)) query: AdminIdentityQuery,
   ): Promise<AdminIdentityListResponse> {
     return { identities: await this.archive.findIdentities(query.q ?? '') };
+  }
+
+  /**
+   * Suspends one anonymous identity.
+   *
+   * The owner supplies the reason; it is stored on the identity and shown back in the
+   * search result. The response is the updated identity, not a bare 204, because the panel
+   * has to render the new state from the server rather than assume its request worked.
+   */
+  @Post('identities/:publicId/ban')
+  @HttpCode(200)
+  async banIdentity(
+    @Param(zodParam(userLookupParamsSchema)) params: { publicId: string },
+    @Body(zodBody(adminBanSchema)) body: AdminBanInput,
+  ): Promise<AdminIdentityView> {
+    const banned = await this.moderation.banByPublicId(params.publicId, body.reason);
+    if (!banned) throw new AppError(ErrorCode.USER_NOT_FOUND);
+    return banned;
+  }
+
+  /** Lifts a suspension. Idempotent: unbanning an active identity answers with its state. */
+  @Delete('identities/:publicId/ban')
+  async unbanIdentity(
+    @Param(zodParam(userLookupParamsSchema)) params: { publicId: string },
+  ): Promise<AdminIdentityView> {
+    const unbanned = await this.moderation.unbanByPublicId(params.publicId);
+    if (!unbanned) throw new AppError(ErrorCode.USER_NOT_FOUND);
+    return unbanned;
   }
 
   /** Archived conversations, newest first. */

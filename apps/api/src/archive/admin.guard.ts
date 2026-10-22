@@ -26,6 +26,15 @@ import { APP_CONFIG, type AppConfig } from '../config/env.js';
  *    be attacked through a door that was never built.
  *  - The comparison hashes both sides first. `timingSafeEqual` throws on different
  *    lengths, and comparing raw strings would leak a prefix match through timing.
+ *
+ * ## The seam for moderator accounts
+ *
+ * This class is the only place that decides *who may enter* `/admin`. When accounts arrive,
+ * replacing this guard with one that resolves an account and attaches its id is the change;
+ * every route already goes through it, and the moderation services take an explicit target
+ * and reason rather than assuming a credential. The missing piece will be attribution: an
+ * append-only audit row per action, written with the account id. Until then `ADMIN_TOKEN`
+ * means the owner and nobody else, and a ban cannot be attributed to a person (D36).
  */
 @Injectable()
 export class AdminGuard implements CanActivate {

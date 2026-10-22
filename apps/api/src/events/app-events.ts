@@ -86,6 +86,15 @@ export type AppEvent =
     }
   /** An explicit removal by the other side. `userId` is the person being told. */
   | { type: 'friend.removed'; userId: string; publicId: string }
+  // --- moderation ----------------------------------------------------------
+  /**
+   * The owner suspended an identity.
+   *
+   * Carries no public reason: the peer of a live chat must not learn that the other side
+   * was banned. The gateway ends the chat and closes the identity's sockets; the domain
+   * never imports the gateway.
+   */
+  | { type: 'identity.banned'; userId: string }
   // --- session lifecycle ---------------------------------------------------
   /**
    * The identity behind these sockets was re-issued (the user asked for a new User
@@ -96,7 +105,7 @@ export type AppEvent =
 
 /** Reasons a chat can end, as seen by the domain (before per-viewer translation). */
 export type ChatEndReasonSource =
-  'left' | 'disconnected' | 'blocked' | 'reported' | 'server_shutdown' | 'expired';
+  'left' | 'disconnected' | 'blocked' | 'reported' | 'banned' | 'server_shutdown' | 'expired';
 
 export type AppEventListener = (event: AppEvent) => void;
 

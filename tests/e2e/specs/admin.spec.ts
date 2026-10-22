@@ -187,4 +187,44 @@ test.describe('the owner archive page', () => {
     await second.context.close();
     await secondPeer.context.close();
   });
+
+  test('bans a User ID, closes the banned tab, and lets it back in after unbanning', async ({
+    browser,
+  }) => {
+    const owner = await openOwnerPage(browser);
+    await signIn(owner.page);
+
+    const user = await newIdentity(browser);
+
+    const search = owner.page.getByLabel('Найти пользователя по User ID', { exact: true });
+    await search.fill(user.publicId);
+
+    const row = owner.page.getByRole('listitem').filter({ hasText: user.publicId });
+    await expect(row).toBeVisible();
+    await row.getByLabel(`Причина бана ${user.publicId}`).fill('проверка бана');
+    await row.getByRole('button', { name: 'Забанить', exact: true }).click();
+
+    await expect(row.getByText('Заблокирован', { exact: true })).toBeVisible();
+    await expect(row.getByText('проверка бана')).toBeVisible();
+
+    // The live tab is told by the server, not merely left to fail on the next action.
+    await expect(user.page.getByText('Доступ закрыт', { exact: true }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(user.page.getByText('Эта анонимная личность заблокирована.')).toBeVisible();
+
+    // Unbanning restores the same identity: the session was never revoked, so pressing
+    // "Повторить" must open the app again instead of minting a new User ID.
+    await row.getByRole('button', { name: 'Разбанить', exact: true }).click();
+    await expect(row.getByText('Активен', { exact: true })).toBeVisible();
+
+    await user.page.getByRole('button', { name: 'Повторить', exact: true }).click();
+    await expect(user.page.getByText('На связи', { exact: true })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(user.page.locator('#own-user-id')).toHaveText(user.displayId);
+
+    await owner.context.close();
+    await user.context.close();
+  });
 });

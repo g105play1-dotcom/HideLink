@@ -811,6 +811,33 @@ export class ChatService implements OnApplicationShutdown {
     this.startGrace(chat, userId);
   }
 
+  /**
+   * The owner suspended this identity.
+   *
+   * Unlike a disconnect, this is not a pause: the chat ends immediately, no grace timer
+   * is started, and every pending invitation involving the person is withdrawn. The
+   * gateway publishes the event because the chat domain must not know about sockets.
+   */
+  handleBanned(userId: string): void {
+    this.matching.cancel(userId);
+    this.cancelOutgoingRequests(userId);
+
+    for (const request of this.requests.takeByTarget(userId)) {
+      this.bus.emit({
+        type: 'request.resolved',
+        userId: request.fromUserId,
+        requestId: request.requestId,
+        status: 'cancelled',
+      });
+    }
+
+    const chat = this.registry.activeFor(userId);
+    if (!chat) return;
+
+    this.cancelGraceTimersFor(chat.chatId);
+    this.endChat(chat, 'banned', userId);
+  }
+
   /** Whether the caller and the other participant of their active chat are friends. */
   async areChatPeersFriends(userId: string): Promise<boolean> {
     const chat = this.registry.activeFor(userId);
@@ -1119,7 +1146,11 @@ export class ChatService implements OnApplicationShutdown {
     if (!chat.isActive) return;
 
     this.cancelFriendRequestsForChat(chat.chatId);
-    this.registry.end(chat, reason, new Date(), endedBy);
+    // A suspension is a server-only cause: the durable `ChatEndReason` vocabulary is also
+    // shown to users and archived, so it records the chat as an ordinary end. The bus
+    // event below still carries `banned`, which is what the gateway needs to avoid telling
+    // the peer why the other side disappeared.
+    this.registry.end(chat, reason === 'banned' ? 'left' : reason, new Date(), endedBy);
     this.cancelGraceTimersFor(chat.chatId);
 
     this.bus.emit({ type: 'chat.ended', chat, reason });

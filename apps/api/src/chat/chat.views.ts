@@ -82,6 +82,11 @@ export function endedReasonFor(
       return isActor ? 'blocked' : 'peer_left';
     case 'reported':
       return isActor ? 'reported' : 'peer_left';
+    // A suspension is never disclosed to the other side. The banned person is closed
+    // before the reason matters to them; their peer sees an ordinary end, exactly as
+    // with a block or a report.
+    case 'banned':
+      return 'peer_left';
     default:
       return reason;
   }
