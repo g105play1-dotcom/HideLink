@@ -3,18 +3,30 @@
 import {
   ADMIN_BAN_REASON_MAX_LENGTH,
   ADMIN_BAN_REASON_MIN_LENGTH,
+  ADMIN_USER_ACTIVITY,
   ARCHIVE_RETENTION_MAX_DAYS,
   ErrorCode,
   GENDERS,
   LANGUAGES,
   MEDIA_KINDS,
+  PROFILE_LIMITS,
   REPORT_STATUSES,
   type AdminIdentityListResponse,
   type AdminIdentityView,
+  type AdminOwnerChatListResponse,
+  type AdminOwnerChatView,
+  type AdminOwnerJoinResponse,
+  type AdminOwnerLeaveResponse,
+  type AdminOwnerMessageSentView,
+  type AdminOwnerReservationListResponse,
   type AdminPlatformView,
   type AdminReportListResponse,
   type AdminReportView,
   type AdminStatusView,
+  type AdminUserActivity,
+  type AdminUserListResponse,
+  type AdminUserQuery,
+  type AdminUserView,
   type ArchiveDeletionResponse,
   type ArchiveListResponse,
   type ArchivePolicy,
@@ -37,11 +49,17 @@ import {
   KeyRound,
   LoaderCircle,
   LogOut,
+  MessageCircle,
+  Search,
+  Send,
   ShieldCheck,
+  Star,
+  StarOff,
   Trash2,
   UserCheck,
   UserPlus,
   UserX,
+  X,
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
@@ -52,7 +70,12 @@ import { Input } from '@/components/ui/input';
 import { setHtmlLangOverride } from '@/i18n';
 import { describeError, REPORT_REASON_LABELS } from '@/lib/error-text';
 import { apiRequest } from '@/lib/http';
-import { LANGUAGE_LABELS, OWNER_TOPIC_LABELS } from '@/lib/labels';
+import {
+  LANGUAGE_LABELS,
+  OWNER_TOPIC_LABELS,
+  describeCriteria,
+  describeProfile,
+} from '@/lib/labels';
 
 /**
  * The owner's archive page.
@@ -359,6 +382,11 @@ function AdminPanel({ onLocked }: { onLocked: () => void }) {
     queryClient.removeQueries({ queryKey: ['admin', 'messages'] });
     queryClient.removeQueries({ queryKey: ['admin', 'platform'] });
     queryClient.removeQueries({ queryKey: ['admin', 'reports'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'users'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'favorites'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'ownerChats'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'ownerChat'] });
+    queryClient.removeQueries({ queryKey: ['admin', 'reservations'] });
   };
 
   const lock = useMutation({
@@ -1109,6 +1137,44 @@ function ModerationPanel({
   );
 }
 
+const ACTIVITY_LABELS: Record<AdminUserActivity, string> = {
+  any: 'Любой',
+  online: 'В сети',
+  searching: 'Ищет',
+  chatting: 'В чате',
+  offline: 'Не в сети',
+};
+
+/**
+ * The directory is queried only with a real criterion: a complete-ish User ID, any filter,
+ * or the favorites switch. That is a server rule too — this helper exists so the browser
+ * does not fire an empty request the server would answer with an empty list anyway.
+ */
+function hasDirectoryFilters(query: AdminUserQuery): boolean {
+  return Object.entries(query).some(
+    ([key, value]) =>
+      key !== 'q' && key !== 'limit' && value !== undefined && value !== '' && value !== 'any',
+  );
+}
+
+function adminUsersPath(query: AdminUserQuery): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === '' || value === 'any') continue;
+    params.set(key, String(value));
+  }
+  const suffix = params.toString();
+  return `/admin/users${suffix.length > 0 ? `?${suffix}` : ''}`;
+}
+
+function invalidatePeople(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'favorites'] });
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'reservations'] });
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'ownerChats'] });
+  void queryClient.invalidateQueries({ queryKey: ['admin', 'identities'] });
+}
+
 function UserAccessPanel({
   search,
   onSearchChange,
@@ -1116,81 +1182,529 @@ function UserAccessPanel({
   search: string;
   onSearchChange: (value: string) => void;
 }) {
+  const [draft, setDraft] = useState<AdminUserQuery>({});
+  const [applied, setApplied] = useState<AdminUserQuery>({});
+  const [openChatId, setOpenChatId] = useState<string | null>(null);
+
+  const trimmedSearch = search.trim();
+  const query: AdminUserQuery = {
+    ...applied,
+    ...(trimmedSearch.length >= 4 ? { q: trimmedSearch } : {}),
+  };
+  const hasCriterion = trimmedSearch.length >= 4 || hasDirectoryFilters(applied);
+
   const found = useQuery({
-    queryKey: ['admin', 'identities', search],
-    queryFn: () =>
-      apiRequest<AdminIdentityListResponse>(
-        `/admin/identities?q=${encodeURIComponent(search.trim())}`,
-      ),
-    enabled: search.trim().length >= 4,
+    queryKey: ['admin', 'users', query],
+    queryFn: () => apiRequest<AdminUserListResponse>(adminUsersPath(query)),
+    enabled: hasCriterion,
+    // Presence and queue state are in memory, not columns: poll so an "Ищет" badge and a
+    // join button tell the truth without the owner reloading the whole panel.
+    refetchInterval: hasCriterion ? 5_000 : false,
     retry: false,
   });
 
+  const updateDraft = (patch: Partial<AdminUserQuery>) => {
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setApplied({ ...draft });
+  };
+
+  const reset = () => {
+    setDraft({});
+    setApplied({});
+    onSearchChange('');
+  };
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <UserX className="size-4" aria-hidden="true" />
-          Доступ пользователей
-        </CardTitle>
-        <CardDescription>
-          Найдите анонимный User ID и приостановите его доступ. Причина обязательна: она видна вам,
-          пока бан действует.
-        </CardDescription>
-      </CardHeader>
+    <div className="flex flex-col gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UserX className="size-4" aria-hidden="true" />
+            Пользователи
+          </CardTitle>
+          <CardDescription>
+            Что человек указал о себе и кого он ищет. Здесь же можно приостановить доступ, поставить
+            звезду и незаметно войти в его случайный чат. Условия поиска применяются как «И»; пустые
+            поля не ограничивают.
+          </CardDescription>
+        </CardHeader>
 
-      <CardContent className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm" htmlFor="access-user-search">
-          Найти пользователя по User ID
-          <Input
-            id="access-user-search"
-            value={search}
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="AL…"
-            autoComplete="off"
-          />
-        </label>
+        <CardContent className="flex flex-col gap-4">
+          <label className="flex flex-col gap-1 text-sm" htmlFor="access-user-search">
+            Найти пользователя по User ID
+            <Input
+              id="access-user-search"
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="AL…"
+              autoComplete="off"
+            />
+          </label>
 
-        {search.trim().length > 0 && search.trim().length < 4 ? (
-          <p className="text-xs text-muted-foreground">Введите минимум 4 символа.</p>
-        ) : null}
+          {trimmedSearch.length > 0 && trimmedSearch.length < 4 ? (
+            <p className="text-xs text-muted-foreground">
+              Введите минимум 4 символа User ID или задайте параметры ниже.
+            </p>
+          ) : null}
 
-        {found.isFetching ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-            Ищу…
+          <form className="flex flex-col gap-4" onSubmit={submit}>
+            <fieldset className="flex flex-col gap-3">
+              <legend className="text-sm font-medium">Что человек указал о себе</legend>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <FilterSelect
+                  label="Пол"
+                  value={draft.declaredGender ?? ''}
+                  onChange={(value) =>
+                    updateDraft({ declaredGender: (value || undefined) as Gender | undefined })
+                  }
+                  options={GENDERS.map((gender) => ({
+                    value: gender,
+                    label: GENDER_LABELS[gender],
+                  }))}
+                />
+
+                <FilterNumber
+                  label="Возраст от"
+                  value={draft.ageMin}
+                  onChange={(value) => updateDraft({ ageMin: value })}
+                />
+                <FilterNumber
+                  label="Возраст до"
+                  value={draft.ageMax}
+                  onChange={(value) => updateDraft({ ageMax: value })}
+                />
+
+                <FilterText
+                  label="Страна (код)"
+                  value={draft.declaredCountry ?? ''}
+                  placeholder="RU"
+                  onChange={(value) => updateDraft({ declaredCountry: value || undefined })}
+                />
+                <FilterText
+                  label="Город"
+                  value={draft.declaredCity ?? ''}
+                  onChange={(value) => updateDraft({ declaredCity: value || undefined })}
+                />
+                <FilterText
+                  label="Регион"
+                  value={draft.declaredRegion ?? ''}
+                  onChange={(value) => updateDraft({ declaredRegion: value || undefined })}
+                />
+
+                <FilterSelect
+                  label="Язык"
+                  value={draft.declaredLanguage ?? ''}
+                  onChange={(value) =>
+                    updateDraft({
+                      declaredLanguage: (value || undefined) as AdminUserQuery['declaredLanguage'],
+                    })
+                  }
+                  options={LANGUAGES.map((language) => ({
+                    value: language,
+                    label: LANGUAGE_LABELS[language],
+                  }))}
+                />
+              </div>
+            </fieldset>
+
+            <fieldset className="flex flex-col gap-3 border-t border-border pt-3">
+              <legend className="text-sm font-medium">Кого человек ищет</legend>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <FilterSelect
+                  label="Пол"
+                  value={draft.prefGender ?? ''}
+                  onChange={(value) =>
+                    updateDraft({ prefGender: (value || undefined) as Gender | undefined })
+                  }
+                  options={GENDERS.map((gender) => ({
+                    value: gender,
+                    label: GENDER_LABELS[gender],
+                  }))}
+                />
+
+                <FilterNumber
+                  label="Ищет возраст"
+                  value={draft.seeksAge}
+                  onChange={(value) => updateDraft({ seeksAge: value })}
+                />
+
+                <FilterText
+                  label="Страна (код)"
+                  value={draft.prefCountry ?? ''}
+                  placeholder="RU"
+                  onChange={(value) => updateDraft({ prefCountry: value || undefined })}
+                />
+                <FilterText
+                  label="Город"
+                  value={draft.prefCity ?? ''}
+                  onChange={(value) => updateDraft({ prefCity: value || undefined })}
+                />
+                <FilterText
+                  label="Регион"
+                  value={draft.prefRegion ?? ''}
+                  onChange={(value) => updateDraft({ prefRegion: value || undefined })}
+                />
+
+                <FilterSelect
+                  label="Язык"
+                  value={draft.prefLanguage ?? ''}
+                  onChange={(value) =>
+                    updateDraft({
+                      prefLanguage: (value || undefined) as AdminUserQuery['prefLanguage'],
+                    })
+                  }
+                  options={LANGUAGES.map((language) => ({
+                    value: language,
+                    label: LANGUAGE_LABELS[language],
+                  }))}
+                />
+
+                <FilterSelect
+                  label="Расширение поиска"
+                  value={draft.prefRelax ?? ''}
+                  onChange={(value) =>
+                    updateDraft({
+                      prefRelax: (value || undefined) as AdminUserQuery['prefRelax'],
+                    })
+                  }
+                  options={[
+                    { value: 'yes', label: 'Разрешено' },
+                    { value: 'no', label: 'Запрещено' },
+                  ]}
+                />
+
+                <FilterSelect
+                  label="Активность"
+                  value={draft.status ?? 'any'}
+                  allowEmpty={false}
+                  onChange={(value) => updateDraft({ status: value as AdminUserActivity })}
+                  options={ADMIN_USER_ACTIVITY.map((status) => ({
+                    value: status,
+                    label: ACTIVITY_LABELS[status],
+                  }))}
+                />
+
+                <FilterSelect
+                  label="Избранные"
+                  value={draft.favorite ?? 'any'}
+                  allowEmpty={false}
+                  onChange={(value) => updateDraft({ favorite: value as 'any' | 'yes' | 'no' })}
+                  options={[
+                    { value: 'any', label: 'Все' },
+                    { value: 'yes', label: 'Только избранные' },
+                    { value: 'no', label: 'Только не избранные' },
+                  ]}
+                />
+              </div>
+            </fieldset>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="submit" disabled={found.isFetching}>
+                <Search className="size-4" aria-hidden="true" />
+                Найти
+              </Button>
+              <Button type="button" variant="outline" onClick={reset}>
+                Сбросить
+              </Button>
+              {hasCriterion ? (
+                <span className="text-xs text-muted-foreground">
+                  Найдено: {found.data?.users.length ?? '…'}
+                </span>
+              ) : null}
+            </div>
+          </form>
+
+          {found.isFetching ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+              Ищу…
+            </p>
+          ) : null}
+
+          {found.isError ? <ErrorLine error={found.error} /> : null}
+
+          {found.isSuccess && found.data.users.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Никого не найдено.</p>
+          ) : null}
+
+          {found.isSuccess && found.data.users.length > 0 ? (
+            <ul className="flex flex-col gap-3" aria-label="Найденные пользователи">
+              {found.data.users.map((user) => (
+                <AdminUserRow key={user.publicId} user={user} onOpenChat={setOpenChatId} />
+              ))}
+            </ul>
+          ) : null}
+
+          <p className="text-xs text-muted-foreground">
+            Бан действует на этот User ID и его текущие сессии: перезагрузка не помогает, пока
+            cookie цела. Очистка cookie создаёт новую анонимную личность — это ограничение
+            анонимности, а не ошибка. Дружбы с забаненным ID удаляются.
           </p>
-        ) : null}
+        </CardContent>
+      </Card>
 
-        {found.isError ? <ErrorLine error={found.error} /> : null}
+      <FavoritesSection onOpenChat={setOpenChatId} />
 
-        {found.isSuccess && found.data.identities.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Никого не найдено.</p>
-        ) : null}
+      <ReservationsSection />
 
-        {found.isSuccess && found.data.identities.length > 0 ? (
-          <ul className="flex flex-col gap-3" aria-label="Найденные пользователи">
-            {found.data.identities.map((identity) => (
-              <BanIdentityRow key={identity.publicId} identity={identity} />
-            ))}
-          </ul>
-        ) : null}
-
-        <p className="text-xs text-muted-foreground">
-          Бан действует на этот User ID и его текущие сессии: перезагрузка не помогает, пока cookie
-          цела. Очистка cookie создаёт новую анонимную личность — это ограничение анонимности, а не
-          ошибка. Дружбы с забаненным ID удаляются.
-        </p>
-      </CardContent>
-    </Card>
+      <OwnerChatsSection
+        openChatId={openChatId}
+        onOpenChat={setOpenChatId}
+        onClose={() => setOpenChatId(null)}
+      />
+    </div>
   );
 }
 
-function BanIdentityRow({ identity }: { identity: AdminIdentityView }) {
+function FilterText({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      {label}
+      <Input
+        value={value}
+        placeholder={placeholder}
+        autoComplete="off"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </label>
+  );
+}
+
+function FilterNumber({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | undefined;
+  onChange: (value: number | undefined) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      {label}
+      <Input
+        type="number"
+        min={PROFILE_LIMITS.AGE_MIN}
+        max={PROFILE_LIMITS.AGE_MAX}
+        value={value ?? ''}
+        onChange={(event) =>
+          onChange(event.target.value === '' ? undefined : Number(event.target.value))
+        }
+      />
+    </label>
+  );
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  allowEmpty = true,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  allowEmpty?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      {label}
+      <select
+        className="h-10 rounded-lg border border-border bg-background px-3 text-sm text-foreground"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {allowEmpty ? <option value="">Не важно</option> : null}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function AdminUserRow({
+  user,
+  onOpenChat,
+}: {
+  user: AdminUserView;
+  onOpenChat: (chatId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+
+  const favorite = useMutation({
+    mutationFn: (next: boolean) =>
+      apiRequest<{ favorite: boolean }>(
+        `/admin/users/${encodeURIComponent(user.publicId)}/favorite`,
+        { method: next ? 'PUT' : 'DELETE' },
+      ),
+    onSuccess: () => invalidatePeople(queryClient),
+  });
+
+  const join = useMutation({
+    mutationFn: () =>
+      apiRequest<AdminOwnerJoinResponse>(`/admin/users/${encodeURIComponent(user.publicId)}/join`, {
+        method: 'POST',
+      }),
+    onSuccess: (result) => {
+      invalidatePeople(queryClient);
+      if (result.chat) onOpenChat(result.chat.chatId);
+    },
+  });
+
+  const cancelReservation = useMutation({
+    mutationFn: () =>
+      apiRequest<{ cancelled: boolean }>(
+        `/admin/reservations/${encodeURIComponent(user.publicId)}`,
+        { method: 'DELETE' },
+      ),
+    onSuccess: () => invalidatePeople(queryClient),
+  });
+
+  const profileLines = describeProfile(user.profile);
+  const searchLines = describeCriteria(user.search);
+
+  return (
+    <li className="rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex flex-wrap items-center gap-2">
+          <code className="font-mono text-sm">{user.publicId}</code>
+          <Badge variant={user.banned ? 'destructive' : 'success'}>
+            {user.banned ? 'Заблокирован' : 'Активен'}
+          </Badge>
+          {user.online ? <Badge variant="accent">В сети</Badge> : null}
+          {user.searching ? <Badge variant="accent">Ищет</Badge> : null}
+          {user.chatting ? <Badge variant="accent">В чате</Badge> : null}
+          {user.reserved ? <Badge variant="warning">Ждёт поиска</Badge> : null}
+          {user.favorite ? <Badge variant="warning">Избранное</Badge> : null}
+        </span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={
+              user.favorite
+                ? `Убрать из избранного ${user.publicId}`
+                : `В избранное ${user.publicId}`
+            }
+            disabled={favorite.isPending}
+            onClick={() => favorite.mutate(!user.favorite)}
+          >
+            {user.favorite ? (
+              <StarOff className="size-4" aria-hidden="true" />
+            ) : (
+              <Star className="size-4" aria-hidden="true" />
+            )}
+            {user.favorite ? 'Убрать' : 'В избранное'}
+          </Button>
+
+          {user.ownerChatId ? (
+            <Button size="sm" onClick={() => onOpenChat(user.ownerChatId ?? '')}>
+              <MessageCircle className="size-4" aria-hidden="true" />
+              Открыть чат
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={join.isPending || user.banned}
+              onClick={() => join.mutate()}
+            >
+              <MessageCircle className="size-4" aria-hidden="true" />
+              {user.searching ? 'Присоединиться' : 'Буду первым при поиске'}
+            </Button>
+          )}
+
+          {user.reserved ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={cancelReservation.isPending}
+              onClick={() => cancelReservation.mutate()}
+            >
+              <X className="size-4" aria-hidden="true" />
+              Отменить ожидание
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        <span>создан {formatTimestamp(user.createdAt)}</span>
+        <span>заявки: {user.incomingRequests === 'nobody' ? 'выключены' : 'включены'}</span>
+        {user.favoriteSince ? (
+          <span>в избранном с {formatTimestamp(user.favoriteSince)}</span>
+        ) : null}
+      </div>
+
+      <div className="mt-3 grid gap-3 border-t border-border pt-3 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">О себе</p>
+          {profileLines.length > 0 ? (
+            <ul className="mt-1 flex flex-col gap-0.5 text-sm">
+              {profileLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">Профиль не заполнен.</p>
+          )}
+        </div>
+
+        <div>
+          <p className="text-xs font-medium text-muted-foreground">Ищет</p>
+          {searchLines.length > 0 ? (
+            <ul className="mt-1 flex flex-col gap-0.5 text-sm">
+              {searchLines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">Без фильтров.</p>
+          )}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Снятие фильтров: {user.search.relaxAllowed ? 'разрешено' : 'запрещено'}
+          </p>
+        </div>
+      </div>
+
+      {user.reserved ? (
+        <p className="mt-2 text-xs text-muted-foreground" role="status">
+          Ждём: вы будете первым, когда этот человек начнёт поиск.
+        </p>
+      ) : null}
+      {join.isError ? <ErrorLine error={join.error} /> : null}
+      {favorite.isError ? <ErrorLine error={favorite.error} /> : null}
+      {cancelReservation.isError ? <ErrorLine error={cancelReservation.error} /> : null}
+
+      <BanControls identity={user} />
+    </li>
+  );
+}
+
+function BanControls({ identity }: { identity: AdminIdentityView }) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState('');
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'identities'] });
+  const invalidate = () => invalidatePeople(queryClient);
 
   const ban = useMutation({
     mutationFn: () =>
@@ -1216,21 +1730,9 @@ function BanIdentityRow({ identity }: { identity: AdminIdentityView }) {
     trimmedReason.length <= ADMIN_BAN_REASON_MAX_LENGTH;
 
   return (
-    <li className="rounded-lg border border-border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="flex flex-wrap items-center gap-2">
-          <code className="font-mono text-sm">{identity.publicId}</code>
-          <Badge variant={identity.banned ? 'destructive' : 'success'}>
-            {identity.banned ? 'Заблокирован' : 'Активен'}
-          </Badge>
-          <span className="text-xs text-muted-foreground">
-            создан {formatTimestamp(identity.createdAt)}
-          </span>
-        </span>
-      </div>
-
+    <div className="mt-3 border-t border-border pt-3">
       {identity.banned ? (
-        <div className="mt-3 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           <p className="text-sm">
             <span className="text-muted-foreground">Причина: </span>
             {identity.bannedReason ?? 'не указана'}
@@ -1256,7 +1758,7 @@ function BanIdentityRow({ identity }: { identity: AdminIdentityView }) {
           {unban.isError ? <ErrorLine error={unban.error} /> : null}
         </div>
       ) : (
-        <div className="mt-3 flex flex-col gap-2">
+        <div className="flex flex-col gap-2">
           <label
             className="flex flex-col gap-1 text-sm"
             htmlFor={`ban-reason-${identity.publicId}`}
@@ -1294,7 +1796,322 @@ function BanIdentityRow({ identity }: { identity: AdminIdentityView }) {
           {ban.isError ? <ErrorLine error={ban.error} /> : null}
         </div>
       )}
-    </li>
+    </div>
+  );
+}
+
+function FavoritesSection({ onOpenChat }: { onOpenChat: (chatId: string) => void }) {
+  const favorites = useQuery({
+    queryKey: ['admin', 'favorites'],
+    queryFn: () =>
+      apiRequest<AdminUserListResponse>(adminUsersPath({ favorite: 'yes', limit: 100 })),
+    refetchInterval: 10_000,
+    retry: false,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Star className="size-4 text-primary" aria-hidden="true" />
+          Избранные
+        </CardTitle>
+        <CardDescription>
+          Люди, которых вы отметили звездой. Здесь доступны те же действия: профиль и фильтры, бан,
+          скрытый чат.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">
+        {favorites.isPending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю избранное…
+          </p>
+        ) : null}
+        {favorites.isError ? <ErrorLine error={favorites.error} /> : null}
+        {favorites.isSuccess && favorites.data.users.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Пока никого не отметили.</p>
+        ) : null}
+        {favorites.isSuccess && favorites.data.users.length > 0 ? (
+          <ul className="flex flex-col gap-3" aria-label="Избранные пользователи">
+            {favorites.data.users.map((user) => (
+              <AdminUserRow key={user.publicId} user={user} onOpenChat={onOpenChat} />
+            ))}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReservationsSection() {
+  const queryClient = useQueryClient();
+
+  const reservations = useQuery({
+    queryKey: ['admin', 'reservations'],
+    queryFn: () => apiRequest<AdminOwnerReservationListResponse>('/admin/reservations'),
+    refetchInterval: 5_000,
+    retry: false,
+  });
+
+  const cancel = useMutation({
+    mutationFn: (publicId: string) =>
+      apiRequest<{ cancelled: boolean }>(`/admin/reservations/${encodeURIComponent(publicId)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => invalidatePeople(queryClient),
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MessageCircle className="size-4 text-primary" aria-hidden="true" />
+          Ожидают поиска
+        </CardTitle>
+        <CardDescription>
+          Обещание «я буду первым, когда ты начнёшь искать». Оно хранится, пока человек не начнёт
+          поиск или вы его не отмените.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">
+        {reservations.isPending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю ожидание…
+          </p>
+        ) : null}
+        {reservations.isError ? <ErrorLine error={reservations.error} /> : null}
+        {cancel.isError ? <ErrorLine error={cancel.error} /> : null}
+        {reservations.isSuccess && reservations.data.reservations.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Никого не ждём.</p>
+        ) : null}
+        {reservations.isSuccess && reservations.data.reservations.length > 0 ? (
+          <ul className="flex flex-col gap-2" aria-label="Ожидающие поиска">
+            {reservations.data.reservations.map((reservation) => (
+              <li
+                key={reservation.targetPublicId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3"
+              >
+                <span className="flex flex-wrap items-center gap-2 text-sm">
+                  <code className="font-mono">{reservation.targetPublicId}</code>
+                  {reservation.online ? <Badge variant="accent">В сети</Badge> : null}
+                  {reservation.searching ? <Badge variant="accent">Ищет</Badge> : null}
+                  {reservation.chatting ? <Badge variant="accent">В чате</Badge> : null}
+                  <span className="text-xs text-muted-foreground">
+                    с {formatTimestamp(reservation.createdAt)}
+                  </span>
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={cancel.isPending}
+                  onClick={() => cancel.mutate(reservation.targetPublicId)}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                  Отменить
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OwnerChatsSection({
+  openChatId,
+  onOpenChat,
+  onClose,
+}: {
+  openChatId: string | null;
+  onOpenChat: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  const chats = useQuery({
+    queryKey: ['admin', 'ownerChats'],
+    queryFn: () => apiRequest<AdminOwnerChatListResponse>('/admin/chats'),
+    refetchInterval: 3_000,
+    retry: false,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MessageCircle className="size-4 text-primary" aria-hidden="true" />
+          Скрытые чаты
+        </CardTitle>
+        <CardDescription>
+          Разговоры, в которые вы вошли как обычный собеседник. Пользователь видит случайного
+          человека и не знает, что это владелец. Текст живёт в памяти сервера, как и любой случайный
+          чат; архив применяется по обычной политике.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-3">
+        {chats.isPending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю чаты…
+          </p>
+        ) : null}
+        {chats.isError ? <ErrorLine error={chats.error} /> : null}
+        {chats.isSuccess && chats.data.chats.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Скрытых чатов сейчас нет.</p>
+        ) : null}
+        {chats.isSuccess && chats.data.chats.length > 0 ? (
+          <ul className="flex flex-col gap-2">
+            {chats.data.chats.map((chat) => (
+              <li
+                key={chat.chatId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3"
+              >
+                <span className="flex flex-wrap items-center gap-2 text-sm">
+                  <code className="font-mono">{chat.targetPublicId}</code>
+                  <Badge variant={chat.status === 'active' ? 'success' : 'default'}>
+                    {chat.status === 'active' ? 'Идёт' : 'Завершён'}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    сообщений: {chat.messageCount} · с {formatTimestamp(chat.startedAt)}
+                  </span>
+                </span>
+                <Button
+                  variant={openChatId === chat.chatId ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => onOpenChat(chat.chatId)}
+                >
+                  {openChatId === chat.chatId ? 'Открыт' : 'Открыть'}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {openChatId ? <OwnerChatPanel chatId={openChatId} onClose={onClose} /> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function OwnerChatPanel({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [text, setText] = useState('');
+
+  const transcript = useQuery({
+    queryKey: ['admin', 'ownerChat', chatId],
+    queryFn: () => apiRequest<AdminOwnerChatView>(`/admin/chats/${chatId}`),
+    refetchInterval: 1_500,
+    retry: false,
+  });
+
+  const send = useMutation({
+    mutationFn: () =>
+      apiRequest<AdminOwnerMessageSentView>(`/admin/chats/${chatId}/messages`, {
+        method: 'POST',
+        json: { text: text.trim() },
+      }),
+    onSuccess: () => {
+      setText('');
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'ownerChat', chatId] });
+      invalidatePeople(queryClient);
+    },
+  });
+
+  const leave = useMutation({
+    mutationFn: () =>
+      apiRequest<AdminOwnerLeaveResponse>(`/admin/chats/${chatId}/leave`, { method: 'POST' }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'ownerChat', chatId] });
+      invalidatePeople(queryClient);
+    },
+  });
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (text.trim().length === 0) return;
+    send.mutate();
+  };
+
+  const chat = transcript.data?.chat;
+  const messages = transcript.data?.messages ?? [];
+  const ended = chat?.status === 'ended';
+
+  return (
+    <div className="rounded-lg border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-3">
+        <span className="flex flex-wrap items-center gap-2 text-sm">
+          <MessageCircle className="size-4" aria-hidden="true" />
+          Чат с <code className="font-mono">{chat?.targetPublicId ?? '…'}</code>
+          {chat ? (
+            <Badge variant={ended ? 'default' : 'success'}>{ended ? 'Завершён' : 'Идёт'}</Badge>
+          ) : null}
+        </span>
+        <Button variant="ghost" size="sm" onClick={onClose} aria-label="Закрыть чат">
+          <X className="size-4" aria-hidden="true" />
+          Закрыть
+        </Button>
+      </div>
+
+      <div className="flex max-h-80 flex-col gap-2 overflow-y-auto p-3">
+        {transcript.isPending ? (
+          <p className="flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            Загружаю переписку…
+          </p>
+        ) : null}
+        {transcript.isError ? <ErrorLine error={transcript.error} /> : null}
+        {transcript.isSuccess && messages.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Сообщений пока нет.</p>
+        ) : null}
+        {messages.map((message) => (
+          <div
+            key={message.messageId}
+            className={
+              message.from === 'owner'
+                ? 'self-end rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground'
+                : 'self-start rounded-lg bg-muted px-3 py-2 text-sm'
+            }
+          >
+            <p className="whitespace-pre-wrap">{message.text}</p>
+            <p className="mt-1 text-[11px] opacity-70">
+              {message.from === 'owner' ? 'Вы' : 'Собеседник'} · {formatTimestamp(message.sentAt)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {ended ? (
+        <p className="border-t border-border p-3 text-sm text-muted-foreground">
+          Чат завершён. Переписка исчезнет из памяти после короткой задержки, как у любого
+          случайного чата.
+        </p>
+      ) : (
+        <form className="flex items-end gap-2 border-t border-border p-3" onSubmit={submit}>
+          <Input
+            aria-label="Сообщение"
+            value={text}
+            maxLength={4000}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Написать как случайный собеседник…"
+          />
+          <Button type="submit" disabled={send.isPending || text.trim().length === 0}>
+            <Send className="size-4" aria-hidden="true" />
+            Отправить
+          </Button>
+          <Button variant="outline" disabled={leave.isPending} onClick={() => leave.mutate()}>
+            <LogOut className="size-4" aria-hidden="true" />
+            Выйти
+          </Button>
+        </form>
+      )}
+
+      {send.isError ? <ErrorLine error={send.error} /> : null}
+      {leave.isError ? <ErrorLine error={leave.error} /> : null}
+    </div>
   );
 }
 

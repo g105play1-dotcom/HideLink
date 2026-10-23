@@ -117,6 +117,58 @@ export async function setBlockingPolicy(blockingEnabled: boolean): Promise<void>
   await setPlatformPolicy({ blockingEnabled });
 }
 
+/**
+ * Clears the owner's directory state that a spec may have left behind.
+ *
+ * Favorites, reservations and hidden chats are global to this API process/database, like
+ * the archive. The integration suite shares both, so a failed spec must not hand the next
+ * one a pending reservation for a user who no longer exists. Goes through the API on
+ * purpose: cleanup must not depend on the screen under test.
+ */
+export async function resetOwnerDirectory(): Promise<void> {
+  const headers = { authorization: `Bearer ${E2E_ADMIN_TOKEN}` };
+
+  const favoritesResponse = await fetch(`${E2E_API_BASE}/admin/users?favorite=yes&limit=100`, {
+    headers,
+  });
+  if (!favoritesResponse.ok) {
+    throw new Error(`[e2e] owner API GET /admin/users answered ${favoritesResponse.status}`);
+  }
+  const favorites = (await favoritesResponse.json()) as { users: Array<{ publicId: string }> };
+  for (const user of favorites.users) {
+    await ownerApi(`/admin/users/${encodeURIComponent(user.publicId)}/favorite`, {
+      method: 'DELETE',
+    });
+  }
+
+  const reservationsResponse = await fetch(`${E2E_API_BASE}/admin/reservations`, { headers });
+  if (!reservationsResponse.ok) {
+    throw new Error(
+      `[e2e] owner API GET /admin/reservations answered ${reservationsResponse.status}`,
+    );
+  }
+  const reservations = (await reservationsResponse.json()) as {
+    reservations: Array<{ targetPublicId: string }>;
+  };
+  for (const reservation of reservations.reservations) {
+    await ownerApi(`/admin/reservations/${encodeURIComponent(reservation.targetPublicId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  const chatsResponse = await fetch(`${E2E_API_BASE}/admin/chats`, { headers });
+  if (!chatsResponse.ok) {
+    throw new Error(`[e2e] owner API GET /admin/chats answered ${chatsResponse.status}`);
+  }
+  const chats = (await chatsResponse.json()) as {
+    chats: Array<{ chatId: string; status: 'active' | 'ended' }>;
+  };
+  for (const chat of chats.chats) {
+    if (chat.status !== 'active') continue;
+    await ownerApi(`/admin/chats/${chat.chatId}/leave`, { method: 'POST' });
+  }
+}
+
 /** Puts the archive back to the shipped default: switched off, and empty. */
 export async function resetArchive(): Promise<void> {
   await ownerApi('/admin/policy', {

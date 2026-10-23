@@ -118,6 +118,14 @@ model Identity {
   /// themselves are the durable record, and reporting is rare.
   reportWarningAt DateTime? @db.Timestamptz(3)
 
+  /// A synthetic identity the owner uses to join a user's random search (D39).
+  ///
+  /// It has no session, no socket and never enters the matchmaking queue, so it cannot be
+  /// reached or become a normal user. The flag exists so the owner's directory can hide
+  /// these rows: they are an operator tool, not people. A fresh row is created per owner
+  /// chat; the public ID is never disclosed in a random chat.
+  isOwnerPersona Boolean @default(false)
+
   incomingRequests IncomingRequestPolicy @default(everyone)
 
   /// Legacy per-user switch, stored but no longer read.
@@ -186,6 +194,8 @@ model Identity {
   securityEvents SecurityEvent[]
   archiveSubjects ArchiveSubject[]
   ownerMessages OwnerMessage[]
+  ownerFavorite OwnerFavorite?
+  ownerReservation OwnerReservation?
 
   @@index([lastSeenAt])
   @@index([bannedAt])
@@ -412,6 +422,38 @@ model OwnerMessage {
   @@index([createdAt])
   @@index([expiresAt])
   @@index([topic, createdAt])
+}
+
+// -----------------------------------------------------------------------------
+// Owner directory (favorites and reservations)
+// -----------------------------------------------------------------------------
+
+/// A user the owner starred in `/admin`.
+///
+/// The list is deliberately singular: AnonLink has one operator, not moderator accounts.
+/// A favorite reveals nothing to the user it names and is not a moderation decision; it is
+/// a bookmark that keeps a person at hand for inspection or a hidden chat (D39).
+model OwnerFavorite {
+  identityId String   @id @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  identity Identity @relation(fields: [identityId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+}
+
+/// "When this person next searches, put the owner in front of them."
+///
+/// Created by the owner from `/admin`; consumed atomically by `ChatService.joinRandom`.
+/// A row stays until it is used or the owner cancels it, so a target who is offline or
+/// already chatting is not forgotten. See docs/DECISIONS.md D39.
+model OwnerReservation {
+  targetId  String   @id @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  target Identity @relation(fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
 }
 
 // -----------------------------------------------------------------------------

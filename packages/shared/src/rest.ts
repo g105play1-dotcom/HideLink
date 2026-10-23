@@ -146,6 +146,95 @@ export interface AdminIdentityListResponse {
   identities: AdminIdentityView[];
 }
 
+/**
+ * One person as the owner's directory sees them (D39).
+ *
+ * This is the one place where the declared profile and filters are returned to somebody
+ * other than their owner. It is reachable only with the owner key, and the fields are
+ * necessary to answer the questions the owner asked: what this person declared, whom they
+ * are looking for, and whether they can be joined right now. `ownerChatId` is not the
+ * person's chat id; it is the *owner's* hidden chat with them, or null.
+ */
+export interface AdminUserView extends AdminIdentityView {
+  incomingRequests: IncomingRequestPolicy;
+  profile: DeclaredProfile;
+  search: SearchPreferences;
+  favorite: boolean;
+  favoriteSince: string | null;
+  online: boolean;
+  searching: boolean;
+  chatting: boolean;
+  /** A pending "join on next search" reservation exists for this person. */
+  reserved: boolean;
+  ownerChatId: string | null;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserView[];
+}
+
+/** One hidden conversation between the owner and a user, as the owner sees it. */
+export interface AdminOwnerChatSummaryView {
+  chatId: string;
+  /** The person the owner joined. Random chats never show this to the peer. */
+  targetPublicId: string;
+  startedAt: string;
+  endedAt: string | null;
+  endReason: string | null;
+  status: 'active' | 'ended';
+  messageCount: number;
+  lastMessageAt: string | null;
+}
+
+export interface AdminOwnerChatView {
+  chat: AdminOwnerChatSummaryView;
+  messages: Array<{
+    messageId: string;
+    /** From the owner's point of view; the target sees the normal `peer` role. */
+    from: 'owner' | 'target';
+    text: string;
+    sentAt: string;
+  }>;
+}
+
+export interface AdminOwnerChatListResponse {
+  chats: AdminOwnerChatSummaryView[];
+}
+
+export interface AdminOwnerMessageSentView {
+  messageId: string;
+  sentAt: string;
+}
+
+export interface AdminOwnerLeaveResponse {
+  ended: true;
+}
+
+/**
+ * The result of pressing "join" in the directory.
+ *
+ * `joined` means a chat exists now and `chat` is it. `reserved` means the person was not
+ * searching, so the server will put the owner first on their next random search; there is
+ * no chat to read yet.
+ */
+export interface AdminOwnerJoinResponse {
+  kind: 'joined' | 'reserved';
+  chat: AdminOwnerChatSummaryView | null;
+}
+
+/** A pending next-search reservation, shown so the owner can see or cancel it. */
+export interface AdminOwnerReservationView {
+  targetPublicId: string;
+  createdAt: string;
+  online: boolean;
+  searching: boolean;
+  chatting: boolean;
+}
+
+export interface AdminOwnerReservationListResponse {
+  reservations: AdminOwnerReservationView[];
+}
+
 /** One archived conversation, without its messages. */
 export interface ArchivedChatSummaryView {
   chatId: string;

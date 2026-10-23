@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { countrySchema } from './countries.js';
 import { ErrorCode } from './errors.js';
 import { PUBLIC_ID_PREFIX, isValidPublicId, normalizePublicId } from './ids.js';
 import {
@@ -15,7 +16,12 @@ import {
   REPORT_REASONS,
   REPORT_STATUSES,
 } from './limits.js';
-import type { SettingsUpdate } from './preferences.js';
+import {
+  PROFILE_LIMITS,
+  genderSchema,
+  languageSchema,
+  type SettingsUpdate,
+} from './preferences.js';
 
 /**
  * Validation schemas shared by the REST API, the WebSocket gateway and the web
@@ -192,6 +198,71 @@ export const adminIdentityQuerySchema = z
   .object({ q: z.string().trim().max(64).optional() })
   .strict();
 
+/**
+ * The activity states the owner can filter their directory by.
+ *
+ * These are not stored: `online` is presence, `searching` is the in-memory queue and
+ * `chatting` is the live chat registry. The server computes them and filters after the
+ * database query, which is honest about the fact that they cannot be indexed.
+ */
+export const ADMIN_USER_ACTIVITY = ['any', 'online', 'searching', 'chatting', 'offline'] as const;
+export type AdminUserActivity = (typeof ADMIN_USER_ACTIVITY)[number];
+
+const adminAgeQuerySchema = z.coerce
+  .number()
+  .int()
+  .min(PROFILE_LIMITS.AGE_MIN)
+  .max(PROFILE_LIMITS.AGE_MAX);
+
+const adminPlaceQuerySchema = z.string().trim().min(1).max(PROFILE_LIMITS.PLACE_MAX_LENGTH);
+
+/**
+ * REST: `GET /api/v1/admin/users` — the owner's directory.
+ *
+ * One value per field rather than arrays: the panel asks "who declared X / who is looking
+ * for Y", not "who declared any of these ten values". Fields are applied as an AND. The
+ * server still requires at least one criterion, or a favorite filter, before returning
+ * people: an owner surface is not a reason to dump the whole table by accident.
+ *
+ * `favorite` is separate from `status` because it is the one filter the owner can change
+ * without the user doing anything.
+ */
+export const adminUserQuerySchema = z
+  .object({
+    q: z.string().trim().max(64).optional(),
+    declaredGender: genderSchema.optional(),
+    ageMin: adminAgeQuerySchema.optional(),
+    ageMax: adminAgeQuerySchema.optional(),
+    declaredCountry: countrySchema.optional(),
+    declaredCity: adminPlaceQuerySchema.optional(),
+    declaredRegion: adminPlaceQuerySchema.optional(),
+    declaredLanguage: languageSchema.optional(),
+    prefGender: genderSchema.optional(),
+    /** The target's age filter must include this age. */
+    seeksAge: adminAgeQuerySchema.optional(),
+    prefCity: adminPlaceQuerySchema.optional(),
+    prefRegion: adminPlaceQuerySchema.optional(),
+    prefCountry: countrySchema.optional(),
+    prefLanguage: languageSchema.optional(),
+    /** The target allowed the server to widen their search (`prefRelax`). */
+    prefRelax: z.enum(['yes', 'no']).optional(),
+    favorite: z.enum(['any', 'yes', 'no']).optional(),
+    status: z.enum(ADMIN_USER_ACTIVITY).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+  })
+  .strict()
+  .refine(
+    (query) =>
+      query.ageMin === undefined || query.ageMax === undefined || query.ageMin <= query.ageMax,
+    { message: 'AGE_RANGE_INVERTED', path: ['ageMax'] },
+  );
+
+/** REST: `POST /api/v1/admin/chats/:chatId/messages` body. */
+export const adminOwnerMessageSchema = z.object({ text: messageTextSchema }).strict();
+
+/** REST: `GET` / `DELETE /api/v1/admin/chats/:chatId` */
+export const adminOwnerChatParamsSchema = z.object({ chatId: chatIdSchema }).strict();
+
 /** REST: `GET /api/v1/admin/archives?limit=` */
 export const archiveListQuerySchema = z
   .object({ limit: z.coerce.number().int().min(1).max(200).optional() })
@@ -264,6 +335,9 @@ export const adminBanSchema = z
 
 export type AdminSessionInput = z.infer<typeof adminSessionSchema>;
 export type AdminIdentityQuery = z.infer<typeof adminIdentityQuerySchema>;
+export type AdminUserQuery = z.infer<typeof adminUserQuerySchema>;
+export type AdminOwnerMessageInput = z.infer<typeof adminOwnerMessageSchema>;
+export type AdminOwnerChatParams = z.infer<typeof adminOwnerChatParamsSchema>;
 export type ArchiveListQuery = z.infer<typeof archiveListQuerySchema>;
 export type ArchiveParams = z.infer<typeof archiveParamsSchema>;
 export type AdminConfirmInput = z.infer<typeof adminConfirmSchema>;

@@ -155,9 +155,20 @@ that the peer is synthetic; it must never enter `ChatView` or the protocol. A pr
 ends the chat like any vanished peer rather than exposing an infrastructure failure. The full product and
 privacy decision is D38; D37's assistant half remains the read-only, human-confirmed path.
 
+### The owner's hidden join (D39)
+
+The owner's `/admin` surface can put a synthetic peer in front of one person. It is not a second matchmaker:
+
+- **Waiting target.** `OwnerAdminService.join` calls `ChatService.joinAsOwner`. `OwnerMatchService` creates an `Identity` with `isOwnerPersona = true`, no session and no socket, whose declaration is produced by the shared `profileSatisfyingPreferences` from the target's active filters. That keeps `preferencesFit` and `mutuallyCompatible` true in the normal direction instead of bypassing them. The chat then goes through `createAndPersistChat` exactly like a human match; it is a `random` chat with an empty `publicIdByUser` map, so the target receives only a per-chat alias and `from: 'peer'` messages.
+- **Idle target.** If the target is offline, idle or already chatting, no persona is made. `OwnerReservation` stores the promise. At the very start of the target's next `joinRandom`, the reservation is claimed with `deleteMany` (atomic) and the same hidden chat is created; ordinary matchmaking never sees the ticket.
+- **No queue ticket.** A persona is never enqueued and is hidden from the directory. Re-queueing it on a persistence failure would expose a synthetic identity to a real joiner, so an owner-chat rollback requeues nobody; the target's failed join is reported and the owner's reservation is re-armed.
+- **Transcript and leave.** `ChatService.ownerChats` maps chat id to target/persona for the REST surface. Messages are sent by the persona through the normal `sendMessage` path, and leaving calls `leaveChat`, so the target sees `peer_left` like any other peer departure. The entry is pruned with the registry tombstone; the archive policy sees the same chat as a human one.
+
+Because owner chats are read by polling and never by an owner socket, the admin module imports `ChatModule` one way. `OwnerAdminModule` is not imported by chat, and `OwnerMatchModule` contains only the persona/reservation data used by `ChatService`.
+
 ### Rollback path on database failure
 
-`ChatService.createAndPersistChat` bridges the synchronous decision to durable state: cancel both tickets, `registry.create(...)` in memory, then `await prisma.chatSession.create(...)`. If the write throws, `registry.abort(chatId)` removes the in-memory chat and **both** participants are re-enqueued with their own `relaxAllowed`; the caller gets a generic `INTERNAL_ERROR` and the failure is logged as `chat.persist_failed`. In-memory state never survives a decision the database rejected.
+`ChatService.createAndPersistChat` bridges the synchronous decision to durable state: cancel both tickets, `registry.create(...)` in memory, then `await prisma.chatSession.create(...)`. If the write throws, `registry.abort(chatId)` removes the in-memory chat and **both** participants are re-enqueued with their own `relaxAllowed`; the caller gets a generic `INTERNAL_ERROR` and the failure is logged as `chat.persist_failed`. The one exception is an owner chat (D39): re-enqueueing either the synthetic persona or the target would let ordinary matchmaking race the owner's promise, so nobody is re-enqueued and the reservation is re-armed instead. In-memory state never survives a decision the database rejected.
 
 ### Why single-instance
 
@@ -185,7 +196,7 @@ PostgreSQL is the only durable store. It holds identity and session metadata, mo
 
 | Model | Purpose | Notable fields |
 | --- | --- | --- |
-| `Identity` | one anonymous identity; no sign-up | `publicId` (unique), `lastSeenAt`, `bannedAt`, `reportWarningAt`, `incomingRequests`, declared profile + filter columns |
+| `Identity` | one anonymous identity; no sign-up | `publicId` (unique), `lastSeenAt`, `bannedAt`, `reportWarningAt`, `isOwnerPersona`, `incomingRequests`, declared profile + filter columns |
 | `Session` | a bearer session | `tokenHash` (unique, `Char(64)`), `expiresAt`, `revokedAt`, optional `ipHash`/`userAgentHash` |
 | `ChatSession` | one lifecycle row per chat | `kind`, `status`, `startedAt`, `endedAt`, `endReason`, participants, `initiatorId`, `messageCount` |
 | `Block` | one-directional block | `blockerId`, `blockedId`, unique together |
@@ -194,14 +205,16 @@ PostgreSQL is the only durable store. It holds identity and session metadata, mo
 | `Friendship` | one mutual, persistent link created by explicit consent in a chat | canonical `userIdA < userIdB` (unique, DB `CHECK`), `createdAt`; no alias, presence or transcript |
 | `SecurityEvent` | low-frequency, high-signal events | `type`, `identityId`, `targetId`, `expiresAt` |
 | `OwnerMessage` | one message a user sent the owner (topic, text, optional contact) | `topic`, `text`, `contact`, `identityId`, `expiresAt` |
+| `OwnerFavorite` | the owner's bookmark on one identity (D39) | `identityId` (primary key), `createdAt`; invisible to the user |
+| `OwnerReservation` | "first on this person's next random search" (D39) | `targetId` (primary key), `createdAt`; consumed atomically or cancelled |
 | `ArchivePolicy` | the owner's single archive setting | `enabled`, `audience`, criteria columns, `storeText`, `storeMedia`, `retentionDays` |
 | `ArchiveSubject` | one explicitly selected User ID (audience `selected`) | `publicId`, unique |
 | `ChatArchive` | one archived conversation | `chatId`, `participantsAtStart`, `messageCount`, `expiresAt` |
 | `ArchivedMessage` | one stored message | `archiveId`, `seq`, `senderId`, `text`, inert `mediaKind`/`mediaRef`, `sentAt` |
 
-The brief lists five models; the schema actually has **nine** product models (adding `ChatSession`,
-`OwnerMessage`, `PlatformPolicy` and `Friendship`) plus **four** archive models that exist only for the
-owner's opt-in feature.
+The brief lists five models; the schema actually has **eleven** product models (adding `ChatSession`,
+`OwnerMessage`, `PlatformPolicy`, `Friendship`, `OwnerFavorite` and `OwnerReservation`) plus **four**
+archive models that exist only for the owner's opt-in feature.
 
 **Deliberately not stored.** Chat transcripts live only in `ChatRecord.messages` in process memory, bounded by `CHAT_MEMORY_MESSAGE_LIMIT = 200` (`apps/api/src/chat/chat.registry.ts`) — unless the owner's archive selected the chat, in which case the same message is also handed to `ArchiveService.recordMessage`. The only row content a message can otherwise reach is a `Report.messageSnapshot`, always copied from the server's own in-memory message and deleted on `expiresAt`. Pending direct requests live in memory for `CONNECT_REQUEST_TTL_MS = 60_000` (`apps/api/src/chat/chat.requests.ts`) and do not survive a restart; friend requests work the same way for `FRIEND_REQUEST_TTL_MS = 60_000` (`apps/api/src/friends/friend-requests.ts`). A `Friendship` row stores only the two internal identities and `createdAt` — never a transcript, a nickname or presence. The one other place user-written text is stored is `OwnerMessage`: written *by* the user *for* the owner, bounded and retention-bound, and the only stored text the user is told about (`docs/DECISIONS.md` D26, `docs/SECURITY.md` §13.1). `ipHash`/`userAgentHash` are written only when `ABUSE_HASH_SALT` is set (default: unset), and rate-limit trips are never persisted (`docs/DECISIONS.md`, D7). `apps/api/test/persistence.test.ts` enforces the default by reading the database directly and searching every text column for a sent message; `apps/api/test/archive.test.ts` proves the opt-in path.
 

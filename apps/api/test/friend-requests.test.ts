@@ -138,6 +138,7 @@ describe('ChatService friend-request expiry', () => {
       unused,
       friends as never,
       friendRequests,
+      unused,
       bus,
       unused,
     );

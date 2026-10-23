@@ -25,20 +25,21 @@ the E2E package used to answer to `test`).
 
 | Suite | Files | Tests | Kind |
 | --- | --- | --- | --- |
-| `packages/shared` | 6 | **97** | pure unit |
+| `packages/shared` | 6 | **100** | pure unit |
 | `packages/protocol` | 1 | **8** | pure unit |
-| `apps/api` | 17 | **192** | 36 unit + 156 integration |
-| `tests/e2e` | 13 | **36** | browser, two independent contexts |
-| **Total** | **37** | **333** | |
+| `apps/api` | 18 | **196** | 36 unit + 160 integration |
+| `tests/e2e` | 14 | **38** | browser, two independent contexts |
+| **Total** | **39** | **342** | |
 
 `apps/api` unit files (`test/unit/chat-views.test.ts` 17, `test/unit/rate-limit.test.ts` 10,
-`test/unit/platform.test.ts` 4, `test/friend-requests.test.ts` 5) run without a server; the thirteen
+`test/unit/platform.test.ts` 4, `test/friend-requests.test.ts` 5) run without a server; the fourteen
 integration files start a **real API process on port 3101** against the `*_test` database.
 
-**Last full run (2026-10-22, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
-`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `36 passed`. The browser suite
+**Last full run (2026-10-23, this machine).** `pnpm lint`, `pnpm format:check`, `pnpm typecheck`,
+`pnpm test` and `pnpm build` all exit 0; `pnpm test:e2e` reports `38 passed`. The browser suite
 is not decoration — an earlier run failed on `filters.spec.ts` and exposed a real defect, described
-under §5.
+under §5, and the owner-directory run caught a test that used a button's visible text where an
+`aria-label` supplied the accessible name.
 
 ## 3. Unit suites
 
@@ -49,11 +50,14 @@ under §5.
 - `countries.test.ts` (4) — the generated country list has an ISO code and four names per entry, no
   duplicate codes or native names, `countrySchema` canonicalises `de`/` DE ` to `DE` and refuses
   anything outside the list, and an unknown code stays visible instead of rendering as blank.
-- `preferences.test.ts` (38) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
+- `preferences.test.ts` (41) — filter vocabulary, strict/mutual `preferencesFit`, `normalizePlace`
   folding (`Королёв` ≡ `  королев`) and the deduplication of a place list (`normalizePlaces`), the
   relaxation ladder (`activeRelaxationOrder`, `relaxBySteps`, `relaxationStage`), and that an
   undeclared value never satisfies a filter — including a location filter that names countries,
   cities and regions (an **or** across all three lists, and never the searcher's own declaration).
+  `profileSatisfyingPreferences` (D39) is proved to produce a declaration that `preferencesFit`
+  accepts, to use the middle of an age range and the first place alternative, and to leave an
+  unconstrained field unstated instead of inventing one.
 - `ids.test.ts` (18) — `generatePublicId` shape (`AL` + 12 Crockford Base32), `normalizePublicId`
   accepting look-alikes (`O`→`0`, `I`/`L`→`1`, case), `isValidPublicId` rejecting malformed input.
 - `schemas.test.ts` (21) — every Zod input contract, including the age-range `.refine`, unknown-field
@@ -98,6 +102,7 @@ Each file below runs against the live process; the descriptions are the guarante
 | `owner-messages.test.ts` | 7 | "Связаться с администрацией": the text, topic and sender (taken from the session, never the body) are stored with an expiry; unknown topic, empty/over-long text and unknown fields are refused; a session is required; the sixth message of the day from one identity is rate-limited; the inbox is readable and deletable only with the owner key, and deletion is idempotent |
 | `friends.test.ts` | 13 | A friendship appears only after acceptance and then shows each side the other User ID; the second person pressing "add friend" accepts instead of creating a second request; a decline closes the chat and refuses further requests; the requester cannot answer their own request and a failed answer does not consume it; a foreign/unknown chat is refused; ending the chat cancels the pending question for both; `session:ready` restores an incoming/outgoing request and an existing friendship after a reload; a new direct chat with a friend announces that friendship in `chat:started` for both clients; removal is one-sided, notifies the other side and is idempotent; a list is per caller; block, report and identity rotation sever the link (rotation silently) |
 | `ban.test.ts` | 2 | The owner ban requires the key, a reason of 3–200 characters and an existing User ID; suspending a live identity closes its socket with `IDENTITY_BANNED`, ends its chat for the peer as an ordinary `peer_left`, deletes the friendship and notifies the peer, refuses the same cookie on `POST /session` instead of minting a new identity, and unbanning restores that same User ID and session |
+| `owner-directory.test.ts` | 4 | D39's owner surface: search by declared attributes and by the target's active filters (including "seeks this age" and the relaxation switch), profile/filter round-trip, favorite add/list/remove; joining a waiting target creates a normal random chat with no public User ID, messages flow both ways, the transcript is attributed to owner/target, and leaving reaches the target as `peer_left`; joining an idle target stores a reservation, lists it, and the target's next `joinRandom` consumes it before ordinary matching; anonymous access, unknown IDs, empty search and strict query/body validation |
 
 Two deliberate test-environment switches make these deterministic and are the reason some behaviours
 are *not* covered here (`apps/api/test/support/test-env.ts`): `MATCH_RELAX_AFTER_MS=0` and
@@ -128,6 +133,7 @@ exactly one, non-secret, machine-independent way.
 | `access.spec.ts` | 2 | A third party cannot read/write/end/block someone else's chat; an identity cannot be hijacked by replaying another User ID |
 | `resilience.spec.ts` | 4 | Reload mid-chat restores the same conversation without duplicates; a reload does not end the chat for the peer; the composer refuses an over-long message; losing the API and returning leaves no phantom conversation |
 | `admin.spec.ts` | 5 | The owner's page: a wrong key is refused with visible text and the right one opens it; the sign-in survives a reload; both AI switches can be enabled and are still enabled after a reload (then reset through the API); switching storage on makes a real conversation appear in the list with both participants and an openable transcript attributed to its authors; switching it off mid-session records nothing further; "Удалить всё" asks first and then leaves the list empty; and the two users' own screens never mention that anything is being kept. The ban journey suspends a User ID with a reason: the row turns "Заблокирован", the live tab shows "Доступ закрыт", and after "Разбанить" the same tab reconnects as the same User ID |
+| `owner-directory.spec.ts` | 2 | The owner stars a person in `/admin`, sees the same join/ban actions in the separate favorites card and can unstar there, joins their waiting search, sends and receives text through the hidden-chat panel, and leaves while the target sees an ordinary random chat end; and an idle person is reserved, appears in "Ожидают поиска", becomes the owner's chat on their next search, and the owner opens it from the directory |
 | `contact-owner.spec.ts` | 1 | "Связаться с администрацией": the form offers every subsection, keeps "Отправить администрации" disabled until there is text, and a sent message appears in the owner's inbox with its topic and the sender's User ID — the loop a person actually performs, including the promise the form makes before sending |
 | `moderation.spec.ts` | 3 | The owner switches blocking off and a *new* chat loses «Блокировать» (while «Жалоба» stays), then switches it on and a new chat has it again; a user reports the last message, the reported person sees «На вас поступила жалоба», dismisses it, and it stays gone after a reload, while the owner's panel shows the reason, the reporter's note, the server's snapshot, both User IDs and a status that survives a reload; a user blocks the peer through the chat dialog and the person appears in the bottom-right block list beside the friends list, stays there and remains removable after the owner switches new blocks off, without a policy notice in the settings |
 | `layout.spec.ts` | 1 | The one page on a 390×844 screen: every control is present and the page never scrolls sideways |
@@ -230,10 +236,13 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
     surviving a reload; `moderation.spec.ts` drives the platform switch and the report status, but the
     `criteria` and `selected` audiences are
     only exercised at the API level (`archive.test.ts`); no browser test picks a person by search. The
+    directory has its own browser journey (`owner-directory.spec.ts`: search, star, act from the
+    favorites card, join, message, reserve, open the reserved chat, leave and unstar), but its error
+    paths and the profile/filter form's full combination of fields are API-level or unexercised. The
     page also has no coverage of its own error paths beyond a wrong key, and no accessibility audit
-    (see item 4). Writing `admin.spec.ts` was itself the response to two defects that using the page by
-    hand had found: `PUT` was missing from the CORS method list (so "Сохранить" failed with
-    `net::ERR_FAILED` while every server-side test passed) and the key was demanded again after a
+    (see item 4). Writing `admin.spec.ts` was itself the response to two defects that
+    using the page by hand had found: `PUT` was missing from the CORS method list (so "Сохранить" failed
+    with `net::ERR_FAILED` while every server-side test passed) and the key was demanded again after a
     reload although the cookie was still valid. `admin.spec.ts` now fails if either returns. Writing
     `moderation.spec.ts` found a third: the report dialog promised to keep the last message, but the
     client never sent a `messageId`, so every report filed through the interface stored no text.
@@ -245,6 +254,11 @@ Listed so that no reader, and no future contributor, mistakes "green" for "compl
     permissions and rendering their checkboxes; there is no provider, no adapter, no synthetic chat and
     no autonomous action to test. The hidden companion has no "it is labelled" assertion by design
     (D38), and no test can prove a model will not break character.
+17. **Hidden owner chats across a restart and orphaned personas are not tested.** `OwnerChatEntry`, the
+    transcript and the hidden chat itself live in process memory, so a restart ends them like any random
+    chat; the target's next search is ordinary. `OwnerReservation` and `OwnerFavorite` are durable and
+    covered. A persona created just before a crash is inert and excluded from the directory, but no test
+    or sweep removes it — D39 names this as a known gap.
 
 ## 7. Reading a failure
 

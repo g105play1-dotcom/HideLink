@@ -1101,3 +1101,87 @@ the filters (it would be the one match that violates the user's own criteria); s
 friendships, reports or archives to a provider (unnecessary disclosure); enabling autonomy or the
 companion by default (the owner must opt in explicitly); building a provider integration now without
 credentials, a data-processing decision and a cost cap (an unverifiable feature, not a seam).
+
+---
+
+## D39. The owner has a people directory, favorites and a hidden join
+
+**Context.** On 2026-10-22 the owner asked to see what each person declared about themselves and what
+they search for, to find people by any of those values, to keep a favorites list with the same actions,
+and to enter a person's random search as an ordinary peer. The last request is impersonation: the target
+must not learn that the peer is the owner or an operator. It also has to work when the person is not
+currently searching, which means the server must remember a promise for their *next* search. Existing
+admin surfaces expose only a User-ID lookup, a ban and an archive; none of them can answer these
+questions.
+
+**Decision.**
+
+1. **The directory is an owner-only REST surface.** `GET /api/v1/admin/users` is guarded exactly like
+   the rest of `/admin` (`AdminGuard`, owner cookie or bearer key) and lives in a separate
+   `OwnerAdminController` because it needs the chat domain. A request must carry a User-ID fragment
+   (4+ characters), at least one declared/filter field, the favorites switch or an activity filter; an
+   empty request returns an empty list, not the identity table. Results are capped (50 by default, 100
+   maximum). Each `AdminUserView` carries the declared profile, active `SearchPreferences`,
+   `incomingRequests`, favorite state, presence, queue/chat state, reservation state and the owner's
+   active hidden chat id.
+2. **Favorites are a one-operator bookmark, not a moderation decision.** `OwnerFavorite` stores one row
+   per starred identity. It is not disclosed to the person, survives a ban, and is removed only by
+   unstarring. There is still one operator, so no `ownerId` column or moderator accounts are invented
+   here (D36's seam is unchanged).
+3. **Joining a waiting person creates a fresh hidden persona and a normal random chat.**
+   `POST /api/v1/admin/users/:publicId/join` checks the live queue. If the person is waiting, the server
+   creates an `Identity` with `isOwnerPersona = true`, no session and no socket, then calls the same
+   `ChatService.createAndPersistChat` path as matchmaking. The chat's public-ID map is empty, the target
+   receives `chat:started` with a per-chat alias and `from: 'peer'` messages, and the owner reads and
+   writes through REST polling. The target is never told that the peer is the owner.
+4. **The persona mirrors the target's filters instead of bypassing them.** The shared
+   `profileSatisfyingPreferences` picks the first value of each filter and the middle of an age range, so
+   `preferencesFit` (and therefore `mutuallyCompatible`) still passes on the target's side. If the target
+   has no filter, the persona declares nothing. The persona has no search preferences of its own and is
+   never queued, so it cannot be matched with anyone else.
+5. **One persona per chat, never a persistent disguise.** A fresh `isOwnerPersona` identity is created
+   for each owner chat and is excluded from the directory and from every lookup. Reusing one across
+   targets would let a block, report or disclosed User ID accumulate and link conversations; a fresh
+   random identity keeps the random-chat promise. It is discarded if the join loses a race or the chat
+   cannot be persisted.
+6. **An idle person gets a durable reservation.** `OwnerReservation` stores one row per target. It is
+   created when the target is offline, idle or already chatting, survives a restart, and is consumed
+   atomically by `deleteMany` at the start of the target's next `joinRandom`. The owner can list and
+   cancel pending reservations. A ban deletes the reservation, because the next search cannot keep the
+   promise. There is no expiration: the owner asked for "first on the next search", and a silent expiry
+   would make the panel lie.
+7. **The transcript has no new retention surface.** Owner chat text lives in the same in-memory
+   `ChatRegistryService` record as any random chat, is pruned with the same tombstone, and is archived
+   only by the existing archive policy. `OwnerChatEntry` is an in-memory index from chat id to target and
+   persona; it is pruned with the chat record. The REST transcript is owner-only and capped by the same
+   registry limit. The target's archive/preferences are read exactly as for a human peer.
+8. **Leaving is an ordinary peer departure.** `POST /api/v1/admin/chats/:chatId/leave` runs
+   `ChatService.leaveChat` as the persona, so the target sees `peer_left`, not an admin action. The owner
+   cannot block, report, or friend through this surface; those actions still require the target's own
+   session. No push event is invented for the owner page: it polls, like the rest of `/admin`.
+9. **The additive migration is reversible without touching users' data.** `Identity.isOwnerPersona`,
+   `OwnerFavorite` and `OwnerReservation` are new; the rollback drops them. The only loss is the owner's
+   bookmarks/promises and the synthetic marker. Orphaned personas are inert and excluded from every
+   surface; a startup/maintenance cleanup is a future improvement, not part of this decision.
+
+**Consequences.** The owner can inspect and join any active search and will be first on an idle person's
+next one. This is deliberate hidden impersonation and a real power asymmetry: a target cannot consent to
+it and is not told. It is limited to the one person who holds the owner key, is not available to
+moderator accounts (there are none), and writes no message to the database by default. There is still no
+audit log of owner actions (D36's known gap), so the owner's own conduct is not reviewable inside the
+product. A persona may be left behind if the process crashes between its creation and the chat; it has no
+session, is never queued and is hidden from the directory, but it still occupies a row. Activity filters
+are in-memory and therefore evaluated over a bounded database page (500 rows) before the 50/100 result
+cap; an extremely rare status beyond that page can be missed instead of scanned forever. Favorites are
+global state and are not cleaned by the maintenance job.
+
+**Rejected.** Reusing the normal owner identity or a socket (it would make the owner matchable and
+linkable); a persistent persona per target (cross-chat correlation); bypassing the target's filters (the
+one match that violates their own criteria, and a visible lie in the profile); a labelled "admin joined"
+notice (the owner explicitly asked for a hidden join, and the product would become a different thing);
+sending the target's User ID, session, blocks or reports to the owner chat (unnecessary disclosure);
+keeping transcripts in a new table (a new retention surface and a second source of truth); a queue ticket
+for the persona (synthetic users would compete with real people); an expiring reservation (a panel that
+silently forgets a promise); exposing a moderator-account model before it exists (D36).
+
+---

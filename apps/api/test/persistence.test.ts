@@ -318,6 +318,9 @@ describe('sessions and identities', () => {
         // this identity. It is cleared when the warning is acknowledged (D38).
         'reportWarningAt',
         'incomingRequests',
+        // A server-only marker for a hidden owner persona (D39), not data about the
+        // person the owner talks to: the persona has no session and no public presence.
+        'isOwnerPersona',
         // A preference like the one above, not data about the person: whether the block
         // action is offered at all (docs/DECISIONS.md D24).
         'blockingEnabled',

@@ -15,6 +15,7 @@ import { IdentityModule } from './identity/identity.module.js';
 import { RequestGuard } from './identity/request.guard.js';
 import { MaintenanceModule } from './maintenance/maintenance.module.js';
 import { ModerationModule } from './moderation/moderation.module.js';
+import { OwnerAdminModule } from './owner-admin/owner-admin.module.js';
 import { OwnerModule } from './owner/owner.module.js';
 import { PlatformModule } from './platform/platform.module.js';
 import { PresenceModule } from './presence/presence.module.js';
@@ -51,6 +52,7 @@ import { RealtimeModule } from './realtime/realtime.module.js';
     OwnerModule,
     FriendsModule,
     ChatModule,
+    OwnerAdminModule,
     RealtimeModule,
     HealthModule,
     MaintenanceModule,

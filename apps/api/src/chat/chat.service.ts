@@ -21,6 +21,7 @@ import { log } from '../common/logger.js';
 import { sanitizeMessageText } from '../common/sanitize.js';
 import { DirectoryService, type IdentityFacts } from '../directory/directory.service.js';
 import { ModerationService } from '../moderation/moderation.service.js';
+import { OwnerMatchService } from '../owner-match/owner-match.service.js';
 import { PlatformService } from '../platform/platform.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { PresenceService } from '../presence/presence.service.js';
@@ -65,6 +66,25 @@ export interface SearchStatus {
   relaxAfterMs: number | null;
 }
 
+/** One hidden owner conversation. The target never sees this record. */
+export interface OwnerChatEntry {
+  chatId: string;
+  targetId: string;
+  targetPublicId: string;
+  personaId: string;
+  startedAt: Date;
+}
+
+export type OwnerJoinOutcome =
+  | {
+      kind: 'joined';
+      chat: ChatRecord;
+      targetId: string;
+      targetPublicId: string;
+      personaId: string;
+    }
+  | { kind: 'reserved' };
+
 /**
  * The chat domain facade.
  *
@@ -92,6 +112,15 @@ export class ChatService implements OnApplicationShutdown {
   private readonly graceTimers = new Map<string, NodeJS.Timeout>();
   /** In-flight fire-and-forget writes, awaitable by tests and shutdown. */
   private readonly pendingWrites = new Set<Promise<unknown>>();
+  /**
+   * Owner chats by chat id.
+   *
+   * Deliberately in memory: the transcript of an owner chat lives exactly where every other
+   * transcript lives. This map only remembers which hidden persona belongs to which target,
+   * so the admin surface can read and write the conversation through the normal chat path.
+   * It is pruned with the chat tombstone.
+   */
+  private readonly ownerChats = new Map<string, OwnerChatEntry>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -105,6 +134,7 @@ export class ChatService implements OnApplicationShutdown {
     private readonly platform: PlatformService,
     private readonly friends: FriendsService,
     private readonly friendRequests: FriendRequestService,
+    private readonly ownerMatch: OwnerMatchService,
     private readonly bus: AppEventBus,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
@@ -129,6 +159,60 @@ export class ChatService implements OnApplicationShutdown {
 
     if (facts.banned) throw new AppError(ErrorCode.IDENTITY_BANNED);
     if (this.registry.activeFor(userId)) throw new AppError(ErrorCode.ALREADY_IN_CHAT);
+
+    // The owner may have armed "first on your next search". Claim it before ordinary
+    // matchmaking: `deleteMany` makes the claim atomic, so two sockets cannot both start
+    // an owner chat. The reservation is re-armed if creating the chat fails, because the
+    // owner's click should not be silently lost to a database hiccup.
+    if (await this.ownerMatch.takeReservation(userId)) {
+      let persona: { identityId: string } | null = null;
+
+      try {
+        const current = this.directory.get(userId) ?? facts;
+        if (current.banned) throw new AppError(ErrorCode.IDENTITY_BANNED);
+        if (!this.presence.isOnline(userId)) throw new AppError(ErrorCode.USER_UNAVAILABLE);
+
+        persona = await this.ownerMatch.createPersona(current.preferences);
+
+        // The persona write is asynchronous; re-check everything before the synchronous
+        // in-memory chat creation. No await follows this block until the chat exists.
+        if (this.directory.isBanned(userId)) throw new AppError(ErrorCode.IDENTITY_BANNED);
+        if (this.registry.activeFor(userId)) throw new AppError(ErrorCode.ALREADY_IN_CHAT);
+        if (!this.presence.isOnline(userId)) throw new AppError(ErrorCode.USER_UNAVAILABLE);
+
+        const chat = await this.createAndPersistChat({
+          kind: 'random',
+          participantAId: userId,
+          participantBId: persona.identityId,
+          initiatorId: userId,
+          ownerChat: {
+            targetId: userId,
+            targetPublicId: current.publicId,
+            personaId: persona.identityId,
+          },
+        });
+
+        return { kind: 'matched', since: new Date(), chat };
+      } catch (error) {
+        if (persona) {
+          await this.ownerMatch
+            .discardPersona(persona.identityId)
+            .catch((discardError: unknown) => {
+              log.error('owner.persona_discard_failed', discardError);
+            });
+        }
+
+        // A suspended identity must not keep a reservation: the next search would fail
+        // the same way, and the owner's panel should show no pending promise. Every other
+        // failure (persona write, chat persist) is worth re-arming.
+        if (!(error instanceof AppError && error.code === ErrorCode.IDENTITY_BANNED)) {
+          await this.ownerMatch.reserve(userId).catch((reserveError: unknown) => {
+            log.error('owner.reservation_rearm_failed', reserveError, { userId });
+          });
+        }
+        throw error;
+      }
+    }
 
     // A re-join keeps the ticket that already exists, including any relaxation the
     // server has applied to it, so the caller's *current* step count is what counts.
@@ -168,6 +252,128 @@ export class ChatService implements OnApplicationShutdown {
     const cancelled = this.matching.cancel(userId);
     if (cancelled) this.bus.emit({ type: 'match.cancelled', userId, reason: 'user' });
     return cancelled;
+  }
+
+  // ---------------------------------------------------------------------------
+  // The owner's hidden join (D39)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Puts the owner in front of one person as an ordinary random peer.
+   *
+   * If the person is waiting, a synthetic identity is created with a declaration that
+   * satisfies their filters and a random chat starts immediately. If they are not waiting
+   * (offline, idle or already chatting), a reservation is stored instead and consumed by
+   * their next `joinRandom`. Neither path tells the target who the peer is: the chat is a
+   * normal `random` chat and its public-ID map is empty.
+   *
+   * The persona is created *after* the first queue check on purpose. It costs a database
+   * write, and a person who is not searching does not need it until they do. The second
+   * check is synchronous with respect to the in-memory chat creation, so no other joiner
+   * can slip between "still waiting" and "registered".
+   */
+  async joinAsOwner(targetId: string): Promise<OwnerJoinOutcome> {
+    const facts = this.requireFacts(targetId);
+    if (facts.banned) throw new AppError(ErrorCode.IDENTITY_BANNED);
+
+    if (this.registry.activeFor(targetId)) {
+      await this.ownerMatch.reserve(targetId);
+      return { kind: 'reserved' };
+    }
+
+    if (!this.matching.isQueued(targetId)) {
+      await this.ownerMatch.reserve(targetId);
+      return { kind: 'reserved' };
+    }
+
+    const persona = await this.ownerMatch.createPersona(facts.preferences);
+
+    try {
+      const current = this.directory.get(targetId) ?? facts;
+
+      if (current.banned) throw new AppError(ErrorCode.IDENTITY_BANNED);
+      if (
+        this.registry.activeFor(targetId) ||
+        !this.matching.isQueued(targetId) ||
+        !this.presence.isOnline(targetId)
+      ) {
+        await this.ownerMatch.discardPersona(persona.identityId);
+        await this.ownerMatch.reserve(targetId);
+        return { kind: 'reserved' };
+      }
+
+      const chat = await this.createAndPersistChat({
+        kind: 'random',
+        participantAId: targetId,
+        participantBId: persona.identityId,
+        initiatorId: targetId,
+        ownerChat: {
+          targetId,
+          targetPublicId: current.publicId,
+          personaId: persona.identityId,
+        },
+      });
+
+      return {
+        kind: 'joined',
+        chat,
+        targetId,
+        targetPublicId: current.publicId,
+        personaId: persona.identityId,
+      };
+    } catch (error) {
+      await this.ownerMatch.discardPersona(persona.identityId).catch((discardError: unknown) => {
+        log.error('owner.persona_discard_failed', discardError);
+      });
+      throw error;
+    }
+  }
+
+  /** The hidden chats still retained in memory, newest first. */
+  ownerChatEntries(): OwnerChatEntry[] {
+    return [...this.ownerChats.values()].sort(
+      (left, right) => right.startedAt.getTime() - left.startedAt.getTime(),
+    );
+  }
+
+  /** The active hidden chat with this target, if one exists. */
+  ownerChatIdForTarget(targetId: string): string | null {
+    for (const entry of this.ownerChats.values()) {
+      const chat = this.registry.get(entry.chatId);
+      if (entry.targetId === targetId && chat?.isActive === true) return entry.chatId;
+    }
+    return null;
+  }
+
+  ownerChat(chatId: string): { entry: OwnerChatEntry; chat: ChatRecord } | null {
+    const entry = this.ownerChats.get(chatId);
+    if (!entry) return null;
+    const chat = this.registry.get(chatId);
+    return chat ? { entry, chat } : null;
+  }
+
+  /** Sends as the hidden persona through the same validation and fan-out as any message. */
+  sendOwnerMessage(chatId: string, text: string): { messageId: string; sentAt: Date } {
+    const found = this.ownerChat(chatId);
+    if (!found) throw new AppError(ErrorCode.CHAT_NOT_FOUND);
+    return this.sendMessage(found.entry.personaId, {
+      chatId,
+      clientMessageId: newMessageId(),
+      text,
+    });
+  }
+
+  /**
+   * The owner ends the hidden chat.
+   *
+   * From the target's point of view this is exactly "the peer left", so `leaveChat` is
+   * reused rather than special-cased.
+   */
+  async leaveOwnerChat(chatId: string): Promise<void> {
+    const found = this.ownerChat(chatId);
+    if (!found) throw new AppError(ErrorCode.CHAT_NOT_FOUND);
+    if (!found.chat.isActive) throw new AppError(ErrorCode.CHAT_ENDED);
+    await this.leaveChat(found.entry.personaId, chatId);
   }
 
   /**
@@ -901,11 +1107,19 @@ export class ChatService implements OnApplicationShutdown {
       this.bus.emit({ type: 'friend.resolved', request, status: 'expired' });
     }
 
+    const prunedChats = this.registry.sweep(now);
+
+    // The owner's map is only an index into retained chat records. Once the tombstone is
+    // gone the transcript is gone too, so the entry has nothing left to describe.
+    for (const chatId of this.ownerChats.keys()) {
+      if (!this.registry.get(chatId)) this.ownerChats.delete(chatId);
+    }
+
     return {
       expiredTickets: expiredTickets.length,
       expiredRequests: expiredRequests.length,
       expiredFriendRequests: expiredFriendRequests.length,
-      prunedChats: this.registry.sweep(now),
+      prunedChats,
     };
   }
 
@@ -942,6 +1156,7 @@ export class ChatService implements OnApplicationShutdown {
       ...this.presence.stats(),
       pendingRequests: this.requests.stats().pending,
       friendRequests: this.friendRequests.stats(),
+      ownerChats: this.ownerChats.size,
       graceTimers: this.graceTimers.size,
       pendingWrites: this.pendingWrites.size,
     };
@@ -1082,6 +1297,7 @@ export class ChatService implements OnApplicationShutdown {
     initiatorId: string;
     publicIdByUser?: ReadonlyMap<string, string>;
     friendsWithPeer?: boolean;
+    ownerChat?: { targetId: string; targetPublicId: string; personaId: string };
   }): Promise<ChatRecord> {
     const chatId = newChatId();
     const startedAt = new Date();
@@ -1127,14 +1343,30 @@ export class ChatService implements OnApplicationShutdown {
       // service failing is not their fault. Re-queueing may pair them with someone
       // else immediately, which is the desired behaviour. Their relaxation permission
       // travels with them, so a retry cannot silently make their search stricter.
-      for (const id of [params.participantAId, params.participantBId]) {
-        this.matching.enqueue(id, {
-          relaxAllowed: this.directory.get(id)?.preferences.relaxAllowed ?? false,
-        });
+      // An owner chat is special. Re-queueing the persona would expose a synthetic identity
+      // to the next real joiner, and re-queueing the target would let them be matched with
+      // a stranger before the owner's re-armed reservation is claimed. The target's failed
+      // join is reported to them and they can press again.
+      if (!params.ownerChat) {
+        for (const id of [params.participantAId, params.participantBId]) {
+          this.matching.enqueue(id, {
+            relaxAllowed: this.directory.get(id)?.preferences.relaxAllowed ?? false,
+          });
+        }
       }
 
       log.error('chat.persist_failed', error, { kind: params.kind });
       throw new AppError(ErrorCode.INTERNAL_ERROR, undefined, { cause: error });
+    }
+
+    if (params.ownerChat) {
+      this.ownerChats.set(chatId, {
+        chatId,
+        targetId: params.ownerChat.targetId,
+        targetPublicId: params.ownerChat.targetPublicId,
+        personaId: params.ownerChat.personaId,
+        startedAt,
+      });
     }
 
     this.bus.emit({ type: 'chat.started', chat });

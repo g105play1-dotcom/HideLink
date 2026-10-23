@@ -370,7 +370,7 @@ The alternative the owner rejected was to keep nothing (D1). A third option — 
 with a key held by the same process — was rejected as theatre: the process must decrypt it to serve
 the page.
 
-Moderators are a separate matter: the moderation panel (§13.2) exists, but there are still no
+Moderators are a separate matter: the moderation panel (§13.3) exists, but there are still no
 moderator accounts. A report carries only the single snapshotted message the reporter's client named.
 
 ### 13.1 The owner's inbox ("Связаться с администрацией")
@@ -399,7 +399,52 @@ The message text is plaintext in PostgreSQL, like the archive. The contact line 
 **not** verified: nothing sends to it, so a user cannot be turned into an outbound relay, and a forged
 value can only mislead the owner's own reply.
 
-### 13.2 Moderation panel
+### 13.2 The people directory and hidden join
+
+The owner asked (2026-10-22, `docs/DECISIONS.md` D39) to inspect declared profiles and active filters, to
+find people by them, to keep favorites, and to enter a person's random search as an ordinary peer. This
+is the most intrusive admin surface in the product; the limits are deliberate.
+
+- **Same credential, separate module.** `GET /admin/users`, the favorites PUT/DELETE, `POST
+  /admin/users/:publicId/join`, `GET /admin/chats`, the transcript/message/leave routes and
+  `GET /admin/reservations` all sit behind `AdminGuard`, which means the same `ADMIN_TOKEN` and the same
+  `404` when it is unset. They are not reachable from the user application and are not part of the user
+  socket protocol.
+- **What the directory exposes.** Declared gender, birth year, country/region/city, languages; the active
+  search filters (genders, age range, countries/regions/cities, languages, `relaxAllowed`); the
+  `incomingRequests` policy; online/searching/chatting state; favorite and reservation state; and the id
+  of the owner's hidden chat. It does **not** expose sessions, tokens, IP/user-agent hashes, blocks,
+  reports, friendships, message history or any other chat's content. Presence is only visible to the
+  owner; the public lookup still returns none.
+- **Search is bounded and requires a criterion.** An empty request returns `[]`, not the identity table;
+  results are capped at 50 by default and 100 maximum, and text search is a normalized public-ID prefix
+  of at least four characters. Favorite and profile filters are exact/contains as documented in
+  `packages/shared/src/schemas.ts`. Status filters are in-memory facts evaluated over a bounded page,
+  not a hidden full-table scan.
+- **The hidden persona.** Each owner chat creates a fresh `Identity` marked `isOwnerPersona`, with no
+  session, no socket and no queue ticket. Its declaration is derived from the target's active filters so
+  that the normal mutual-filter rule still passes; the persona's own preferences accept anyone. It is
+  excluded from every directory lookup and is invisible to the target, whose `ChatView` contains only a
+  per-chat alias. The marker is server-only and is never serialized. A persona is discarded when a join
+  loses a race or persistence fails; a crash can leave an inert row, which is hidden and cannot log in.
+- **No stored transcript by default.** Owner chat text lives in `ChatRegistryService` memory exactly like
+  a human random chat, is bounded by the same message limit and is pruned with the same tombstone. The
+  existing archive policy is the only way it becomes durable, and the target's archive scope applies as
+  usual. `GET /admin/chats/:chatId` reads that memory; nothing is written by the transcript endpoint.
+- **The target is not told.** `chat:started` is a normal random chat; there is no owner marker, no
+  "moderator" label and no disclosure in the DOM. Leaving uses the ordinary `peer_left` path. This is
+  deliberate hidden impersonation: the target cannot consent, and the product does not claim otherwise
+  to them.
+- **Reservations are durable and visible to the owner.** `OwnerReservation` is one row per target and is
+  consumed atomically at the start of their next `joinRandom`; a ban deletes it. There is no expiry, so a
+  forgotten promise is visible in `/admin` rather than silently disappearing.
+- **What is not protected.** There is no audit log of directory reads, stars, joins, reservations,
+  messages or leaves. With one owner there is no per-moderator identity anyway (D36), but the owner's own
+  use of the hidden join is not reviewable inside the product. Favorites are not deleted by the
+  maintenance job, and an orphaned persona after a crash is not swept. Do not give the key to a second
+  person until those gaps are addressed.
+
+### 13.3 Moderation panel
 
 The owner asked (2026-10-20, `docs/DECISIONS.md` D31) that blocking stop being a personal setting,
 that it ship **off**, and that reports — which users could already file — become readable. The panel is
@@ -495,8 +540,8 @@ Each item says what is missing and how it would be verified. None of them is a f
     database and its backups. *Verify:* none — this is a property, not a defect to be tested away; the
     mitigation is an encrypted volume and a backup policy, neither of which is in this repository.
 15. **No second factor and no key rotation for `ADMIN_TOKEN`.** One static secret grants the whole
-    archive, the inbox and the moderation panel. *Verify:* rotate the value, restart, and confirm the
-    old cookie stops working (the cookie holds the key, so it does).
+    archive, the inbox, the moderation panel and the people directory/hidden join. *Verify:* rotate the
+    value, restart, and confirm the old cookie stops working (the cookie holds the key, so it does).
 16. **Admin actions are not attributed and are barely audited.** The `/admin` browser flow is now
     covered by `admin.spec.ts` and `moderation.spec.ts`, but the key is one shared secret: a report
     status change names no person, and only `archive.policy_updated` / `platform.policy_changed` are
@@ -513,6 +558,13 @@ Each item says what is missing and how it would be verified. None of them is a f
     the provider, that a timeout fails closed, and that every synthetic chat is identifiable to the owner
     without being disclosed to the user. Until then, leaving both switches off is the only accurate
     description of the product.
+18. **Hidden owner impersonation has no consent and no audit.** D39 lets the key holder enter any
+    person's search as a peer who claims to be a human. The target is not told, the persona marker is
+    server-only, and directory reads, joins, messages and leaves leave no admin audit record. This is a
+    deliberate power, not a bug, but it is also unaccountable inside the product. *Verify:* do not give
+    the key to anyone who is not the owner; add owner accounts and an append-only audit trail before
+    that changes. A crash can also leave an inert `isOwnerPersona` row; it cannot log in and is hidden
+    from the directory, but no sweep removes it yet.
 
 ## 15. Facts a reader can verify
 

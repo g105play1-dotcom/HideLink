@@ -456,6 +456,39 @@ export function preferencesFit(
   return true;
 }
 
+/**
+ * A declaration that satisfies `prefs`, or the closest honest approximation.
+ *
+ * Used only by the owner's hidden join (D39): the owner's synthetic peer must pass the
+ * target's filters exactly as a normal person would, rather than bypassing them. The
+ * function therefore mirrors the first value of each filter and the middle of an age
+ * range. If a filter list is empty there is no constraint, so the corresponding field is
+ * left unstated instead of inventing a preference the target never expressed.
+ *
+ * This is *not* a way to make a real profile: every value it returns is still
+ * self-declared, unverified data, and the normal matchmaker never calls it.
+ */
+export function profileSatisfyingPreferences(
+  prefs: SearchPreferences,
+  now: Date = new Date(),
+): DeclaredProfile {
+  let birthYear: number | null = null;
+  if (prefs.ageMin !== null || prefs.ageMax !== null) {
+    const min = prefs.ageMin ?? prefs.ageMax ?? 0;
+    const max = prefs.ageMax ?? prefs.ageMin ?? 0;
+    birthYear = birthYearFromAge(Math.round((min + max) / 2), now);
+  }
+
+  return {
+    gender: prefs.genders[0] ?? null,
+    birthYear,
+    country: prefs.countries[0] ?? null,
+    city: prefs.cities[0] ?? null,
+    region: prefs.regions[0] ?? null,
+    languages: [...prefs.languages],
+  };
+}
+
 export interface MatchSide {
   profile: DeclaredProfile;
   preferences: SearchPreferences;

@@ -337,7 +337,8 @@ export class ModerationService {
    * The live sockets are closed through `identity.banned`; the gateway owns sockets and
    * this service must not import it. Friendships are deleted in the same transaction:
    * a banned person must not remain in someone's contact list with a "write" action that
-   * can only fail.
+   * can only fail. Pending owner reservations go too: the owner should not see a promise
+   * that the next search cannot keep.
    */
   async ban(userId: string, reason: string): Promise<void> {
     const friendships = await this.prisma.friendship.findMany({
@@ -364,6 +365,7 @@ export class ModerationService {
       this.prisma.friendship.deleteMany({
         where: { OR: [{ userIdA: userId }, { userIdB: userId }] },
       }),
+      this.prisma.ownerReservation.deleteMany({ where: { targetId: userId } }),
     ]);
 
     this.directory.patch(userId, { banned: true });

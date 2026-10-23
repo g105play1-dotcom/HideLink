@@ -11,6 +11,7 @@ import {
   normalizePlace,
   normalizePlaces,
   preferencesFit,
+  profileSatisfyingPreferences,
   profileUpdateSchema,
   relaxBySteps,
   relaxationStage,
@@ -206,6 +207,45 @@ describe('preferencesFit', () => {
 
     expect(preferencesFit(strict, ideal, NOW)).toBe(true);
     expect(preferencesFit(strict, { ...ideal, city: 'Москва' }, NOW)).toBe(false);
+  });
+});
+
+describe('profileSatisfyingPreferences', () => {
+  it('declares exactly what a strict filter asks for', () => {
+    const strict = prefs({
+      genders: ['female'],
+      ageMin: 25,
+      ageMax: 35,
+      cities: ['Казань'],
+      languages: ['ru'],
+    });
+    const synthetic = profileSatisfyingPreferences(strict, NOW);
+
+    expect(synthetic.gender).toBe('female');
+    expect(synthetic.city).toBe('Казань');
+    expect(synthetic.languages).toEqual(['ru']);
+    expect(preferencesFit(strict, synthetic, NOW)).toBe(true);
+  });
+
+  it('uses the middle of the age range and the first location alternative', () => {
+    const location = prefs({
+      ageMin: 20,
+      ageMax: 40,
+      cities: ['Москва', 'Казань'],
+      regions: ['Татарстан'],
+      countries: ['DE'],
+    });
+    const synthetic = profileSatisfyingPreferences(location, NOW);
+
+    expect(ageFromBirthYear(synthetic.birthYear ?? 0, NOW)).toBe(30);
+    expect(synthetic.city).toBe('Москва');
+    expect(synthetic.region).toBe('Татарстан');
+    expect(synthetic.country).toBe('DE');
+    expect(preferencesFit(location, synthetic, NOW)).toBe(true);
+  });
+
+  it('leaves unconstrained fields unstated rather than inventing them', () => {
+    expect(profileSatisfyingPreferences(prefs(), NOW)).toEqual(profile());
   });
 });
 
