@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ChatEndReason, ChatKind } from '@anonlink/shared';
+import type { ChatEndReason, ChatKind, ChatMediaView } from '@anonlink/shared';
 import { CHAT_MEMORY_MESSAGE_LIMIT, CHAT_TOMBSTONE_TTL_MS } from '@anonlink/shared';
 
 import { peerAlias } from '../common/ids.js';
@@ -15,6 +15,8 @@ export interface StoredMessage {
   readonly messageId: string;
   readonly senderId: string;
   readonly text: string;
+  /** Attachment metadata, when this message carries a photo or an audio recording. */
+  readonly media?: ChatMediaView;
   readonly sentAt: Date;
   /** Present when the sender supplied an idempotency key. */
   readonly clientMessageId?: string;
@@ -149,6 +151,17 @@ export class ChatRecord {
   }
 
   /**
+   * The sender's earlier message with this idempotency key, if it is still in the window.
+   *
+   * Scoped by sender explicitly. Two participants may pick the same random key; without
+   * the sender in the lookup one of them would silently lose the ability to retry.
+   */
+  findClientMessage(senderId: string, clientMessageId: string): StoredMessage | undefined {
+    const existing = this.clientMessageIndex.get(this.clientKey(senderId, clientMessageId));
+    return existing?.senderId === senderId ? existing : undefined;
+  }
+
+  /**
    * Appends a message, or returns the previously stored one when the same
    * `clientMessageId` is replayed.
    *
@@ -157,25 +170,32 @@ export class ChatRecord {
    */
   append(message: Omit<StoredMessage, 'readonly'>): { message: StoredMessage; duplicate: boolean } {
     if (message.clientMessageId) {
-      const existing = this.clientMessageIndex.get(message.clientMessageId);
-      if (existing && existing.senderId === message.senderId) {
-        return { message: existing, duplicate: true };
-      }
+      const existing = this.findClientMessage(message.senderId, message.clientMessageId);
+      if (existing) return { message: existing, duplicate: true };
     }
 
     this.messages.push(message);
     this.messageCount += 1;
 
     if (message.clientMessageId) {
-      this.clientMessageIndex.set(message.clientMessageId, message);
+      this.clientMessageIndex.set(
+        this.clientKey(message.senderId, message.clientMessageId),
+        message,
+      );
     }
 
     while (this.messages.length > CHAT_MEMORY_MESSAGE_LIMIT) {
       const dropped = this.messages.shift();
-      if (dropped?.clientMessageId) this.clientMessageIndex.delete(dropped.clientMessageId);
+      if (dropped?.clientMessageId) {
+        this.clientMessageIndex.delete(this.clientKey(dropped.senderId, dropped.clientMessageId));
+      }
     }
 
     return { message, duplicate: false };
+  }
+
+  private clientKey(senderId: string, clientMessageId: string): string {
+    return `${senderId}:${clientMessageId}`;
   }
 }
 
@@ -255,6 +275,11 @@ export class ChatRegistryService {
   /** Every chat that is currently running. Used by graceful shutdown. */
   activeChats(): ChatRecord[] {
     return [...this.chats.values()].filter((chat) => chat.isActive);
+  }
+
+  /** Every chat still retained, active or in its tombstone window. Used to prune media. */
+  retainedChatIds(): Set<string> {
+    return new Set(this.chats.keys());
   }
 
   /** Marks a chat as finished and frees both participants immediately. */

@@ -28,6 +28,7 @@ The privacy posture is a storage decision, not a policy paragraph.
 | Message text sent through "Связаться с администрацией" | **Yes, on purpose** — the user asked a human to read it, and is told so before sending. Bounded by `OWNER_MESSAGE_MAX_LENGTH`, deleted after `OWNER_MESSAGE_RETENTION_DAYS` (default 180), readable only with `ADMIN_TOKEN` (§13.1). |
 | Name, e-mail, phone, address, GPS, device id | **Never asked for, never stored.** There is no code path that accepts them. |
 | Client IP / User-Agent | **Not stored by default.** Only a salted SHA-256 digest, and only when `ABUSE_HASH_SALT` is deliberately set. |
+| Attachments (photos, audio, voice) | **Bytes are never stored durably.** They live in the API process memory, bounded per chat (32 items / 32 MB) and per process (128 MB), and are freed with the chat tombstone. No URL, disk file or database column contains them. An upload that never becomes a message is deleted after 10 minutes. The owner's archive does not copy them (`docs/DECISIONS.md` D40). |
 | Session token | Only its SHA-256 digest (`IdentityService.createIdentity` → `sha256Hex(token)`). |
 | Public User ID, settings, blocks, reports, **friendships**, security events | Stored. These are the only durable rows (plus the optional archive). A friendship is just two internal identities and a creation timestamp — no alias, transcript, presence or contact data. |
 
@@ -130,6 +131,9 @@ schemas, so a client cannot smuggle extra columns into a settings write.
 | `clientMessageId` | `[A-Za-z0-9_-]{1,64}` | `packages/shared` |
 | Report details / request note | schema-capped, and the abuse-hash fields are redacted from logs | `packages/shared`, `logger.ts` |
 | Friend request / answer | `chatId` must be a UUID, one request per chat, only the addressee may answer | `packages/shared`, `chat.service.ts` |
+| Attachment upload | Image/voice 8 MB, audio 16 MB, per-kind; the request body is streamed with the same hard ceiling and never parsed as JSON | `packages/shared/src/media.ts`, `chat.media.controller.ts` |
+| Attachments per chat / process | 32 items and 32 MB per chat; 128 MB across the process. Overflow is refused with `MEDIA_LIMIT_REACHED`, never evicted | `chat.media.ts` |
+| Attachment type | The declared `Content-Type` is only a cross-check; the server sniffs magic bytes and accepts JPEG/PNG/WebP/GIF/WebM/OGG/MP4/MPEG/WAV/AAC. SVG and arbitrary bytes are refused with `MEDIA_TYPE_UNSUPPORTED` (415) | `chat.media.ts` |
 
 `sanitizeMessageText` removes control and zero-width characters, caps blank-line runs, and truncates
 by code point rather than by UTF-16 unit, so an emoji is never split.
@@ -299,6 +303,15 @@ would become a way to send a message).
   `ChatSession`/`Report` are the only places two identities are linked.
 - The typing indicator was dropped from the MVP rather than shipped: it leaks activity patterns to
   the peer and has no privacy story that justifies it yet (see `docs/DECISIONS.md`).
+- Attachments stay inside the conversation: the peer's view contains type, size and duration, never
+  the uploader's identity; the bytes are fetched with the participant's session and rendered from a
+  tab-local `blob:` URL, so copying the address grants nothing outside that session. There is no public
+  or signed URL, no CDN and no shared album. The server re-checks chat membership on every fetch and
+  uses one `MEDIA_NOT_FOUND` for a wrong chat, wrong uploader or already-attached upload, so the route
+  cannot be used to probe other chats (`docs/DECISIONS.md` D40).
+- The owner's hidden-chat panel can read target-sent media through a separate `AdminGuard` route; the
+  owner is not a participant, and the participant-checked route keeps refusing them. Owner media
+  upload is not implemented.
 
 ## 12. Retention and deletion
 
@@ -314,6 +327,7 @@ which is the enforcement point for every deadline in the schema:
 | Archived conversations (§13) | after the owner's `retentionDays`; `0` means only when the owner deletes them |
 | "Связаться с администрацией" messages (§13.1) | after `OWNER_MESSAGE_RETENTION_DAYS` (180) |
 | Finished chats in memory | after their tombstone expires (`ChatRegistryService.sweep`) |
+| Attachment bytes | with the chat tombstone; an upload that never became a message after 10 minutes (`MEDIA_UNATTACHED_TTL_MS`). An API restart drops all of them at once, and no backup contains them |
 | Pending direct and friend requests | when their 60-second deadline passes, when the chat ends, or on a restart (memory only) |
 | Stale queue tickets, expired requests, rate-limit keys | every sweep |
 
@@ -566,6 +580,19 @@ Each item says what is missing and how it would be verified. None of them is a f
     that changes. A crash can also leave an inert `isOwnerPersona` row; it cannot log in and is hidden
     from the directory, but no sweep removes it yet.
 
+19. **Attachments are neither scanned nor durable.** There is no antivirus, content-safety classifier or
+    transcoder: the server checks the container's magic bytes and the size, then serves the same bytes
+    back. A file that is valid JPEG/WebM but unpleasant is a moderation problem, not a type problem.
+    Bytes disappear on restart and are not backed up (D40), so a "lost photo" is expected behaviour, not
+    an incident. The per-process budget bounds one instance; several instances would each hold their own
+    128 MB, and nothing shares or evicts across them. Voice recording needs `getUserMedia`, which browsers
+    only expose in a secure context (HTTPS or `localhost`), so without gap 1 the microphone button cannot
+    work on a real deployment. Range requests are not implemented, so seeking within a long audio file is
+    whatever the browser can do with a complete body.
+    *Verify:* upload a valid-but-unwanted file and confirm the server stores it unchanged; restart the API
+    and confirm an attachment link becomes `MEDIA_NOT_FOUND`; open the app over plain HTTP from another
+    machine and confirm voice recording is refused.
+
 ## 15. Facts a reader can verify
 
 ```powershell
@@ -589,6 +616,10 @@ pnpm test:e2e -- specs/moderation.spec.ts
 
 # Rate-limit behaviour, in isolation
 pnpm --filter @anonlink/api test test/unit/rate-limit.test.ts
+
+# Attachments: a third identity cannot read, upload or attach; bytes match the declared kind
+pnpm --filter @anonlink/api test test/media.test.ts
+pnpm test:e2e -- specs/media.spec.ts
 
 # Production configuration checks (point .env at production to see the refusal)
 Get-Content apps/api/src/config/env.ts

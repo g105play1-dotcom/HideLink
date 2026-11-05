@@ -1,4 +1,9 @@
-import { ErrorCode, type AdminPlatformView } from '@anonlink/shared';
+import {
+  ErrorCode,
+  type AdminPlatformView,
+  type ChatMediaKind,
+  type ChatMediaView,
+} from '@anonlink/shared';
 import type {
   AckResult,
   ChatView,
@@ -38,6 +43,10 @@ export interface HttpOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   cookie?: string;
   body?: unknown;
+  /** Raw bytes, used by the attachment upload. Takes precedence over `body`. */
+  rawBody?: Uint8Array;
+  /** `Content-Type` for `rawBody`. Defaults to `application/octet-stream`. */
+  contentType?: string;
   origin?: string;
   headers?: Record<string, string>;
 }
@@ -47,18 +56,26 @@ export async function http<T = unknown>(
   path: string,
   options: HttpOptions = {},
 ): Promise<HttpResult<T>> {
-  const { method = 'GET', cookie, body, origin, headers = {} } = options;
+  const { method = 'GET', cookie, body, rawBody, contentType, origin, headers = {} } = options;
+
+  const requestBody = rawBody ?? (body === undefined ? undefined : JSON.stringify(body));
+  const requestContentType =
+    rawBody !== undefined
+      ? (contentType ?? 'application/octet-stream')
+      : body === undefined
+        ? undefined
+        : 'application/json';
 
   const response = await fetch(`${TEST_API_BASE}${path}`, {
     method,
     headers: {
       accept: 'application/json',
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(requestContentType ? { 'content-type': requestContentType } : {}),
       ...(cookie ? { cookie } : {}),
       ...(origin ? { origin } : {}),
       ...headers,
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(requestBody === undefined ? {} : { body: requestBody }),
   });
 
   const text = await response.text();
@@ -67,6 +84,38 @@ export async function http<T = unknown>(
     status: response.status,
     body: (text.length > 0 ? JSON.parse(text) : null) as T,
     setCookie: response.headers.getSetCookie(),
+  };
+}
+
+export interface BinaryHttpResult {
+  status: number;
+  bytes: Buffer;
+  contentType: string | null;
+}
+
+/**
+ * Fetches an endpoint that answers with bytes.
+ *
+ * A separate helper because `http` parses JSON; the attachment route is the only one
+ * that answers with a non-JSON body, and an error from it is JSON, so both shapes have
+ * to be possible.
+ */
+export async function httpBinary(
+  path: string,
+  options: Pick<HttpOptions, 'cookie' | 'headers'> = {},
+): Promise<BinaryHttpResult> {
+  const response = await fetch(`${TEST_API_BASE}${path}`, {
+    headers: {
+      accept: '*/*',
+      ...(options.cookie ? { cookie: options.cookie } : {}),
+      ...options.headers,
+    },
+  });
+
+  return {
+    status: response.status,
+    bytes: Buffer.from(await response.arrayBuffer()),
+    contentType: response.headers.get('content-type'),
   };
 }
 
@@ -357,6 +406,50 @@ export function sendMessage(
     chatId,
     text,
     clientMessageId: clientMessageId ?? `test-${Math.random().toString(36).slice(2, 12)}`,
+  });
+}
+
+/**
+ * Uploads attachment bytes to a chat.
+ *
+ * The metadata is in the query string and the body is the file itself, matching the
+ * documented raw-body contract rather than a multipart form.
+ */
+export function uploadMedia(
+  identity: TestIdentity,
+  chatId: string,
+  kind: ChatMediaKind,
+  bytes: Uint8Array,
+  options: { durationMs?: number; contentType?: string } = {},
+) {
+  const query = new URLSearchParams({ kind });
+  if (options.durationMs !== undefined) query.set('durationMs', String(options.durationMs));
+
+  return http<ChatMediaView>(`/chats/${chatId}/media?${query.toString()}`, {
+    method: 'POST',
+    cookie: identity.cookie,
+    rawBody: bytes,
+    contentType: options.contentType ?? 'application/octet-stream',
+  });
+}
+
+/** Downloads an attachment with a participant's session. */
+export function downloadMedia(identity: TestIdentity, chatId: string, mediaId: string) {
+  return httpBinary(`/chats/${chatId}/media/${mediaId}`, { cookie: identity.cookie });
+}
+
+/** Sends a message that publishes an already-uploaded attachment. */
+export function sendMediaMessage(
+  client: RealtimeClient,
+  chatId: string,
+  mediaId: string,
+  options: { text?: string; clientMessageId?: string } = {},
+) {
+  return client.emit<{ messageId: string; sentAt: string }>('chat:message', {
+    chatId,
+    mediaId,
+    ...(options.text ? { text: options.text } : {}),
+    clientMessageId: options.clientMessageId ?? `test-${Math.random().toString(36).slice(2, 12)}`,
   });
 }
 

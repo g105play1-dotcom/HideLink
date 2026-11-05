@@ -5,6 +5,8 @@ import { FriendsModule } from '../friends/friends.module.js';
 import { ModerationModule } from '../moderation/moderation.module.js';
 import { OwnerMatchModule } from '../owner-match/owner-match.module.js';
 import { ChatController } from './chat.controller.js';
+import { ChatMediaController } from './chat.media.controller.js';
+import { ChatMediaStoreService } from './chat.media.js';
 import { MatchingService } from './chat.matching.js';
 import { ChatRegistryService } from './chat.registry.js';
 import { ConnectionRequestService } from './chat.requests.js';
@@ -23,8 +25,14 @@ import { ChatService } from './chat.service.js';
  */
 @Module({
   imports: [ModerationModule, ArchiveModule, FriendsModule, OwnerMatchModule],
-  controllers: [ChatController],
-  providers: [ChatRegistryService, MatchingService, ConnectionRequestService, ChatService],
+  controllers: [ChatController, ChatMediaController],
+  providers: [
+    ChatRegistryService,
+    ChatMediaStoreService,
+    MatchingService,
+    ConnectionRequestService,
+    ChatService,
+  ],
   exports: [ChatService],
 })
 export class ChatModule {}

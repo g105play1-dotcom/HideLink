@@ -1185,3 +1185,74 @@ for the persona (synthetic users would compete with real people); an expiring re
 silently forgets a promise); exposing a moderator-account model before it exists (D36).
 
 ---
+
+## D40. Attachments are ephemeral in-memory bytes, uploaded over REST and published by a message
+
+**Context.** On 2026-10-23 the owner asked for private file transfer in chats: photos first, then audio
+files and voice messages. The product promises that a random peer never learns the other side's User ID
+and that a conversation is not stored by default (D1). A file-sharing feature is the obvious place to
+break both promises: a public URL can be forwarded, a CDN can log it, and a disk file outlives the chat
+that justified it. The existing infrastructure also has no object storage, no virus scanner, no
+transcoder and no backup story (see `docs/SECURITY.md`).
+
+**Decision.**
+
+1. **Media is a chat attachment, not a library.** A file exists only inside one live conversation. The
+   API keeps the bytes in process memory (`ChatMediaStoreService`), never on disk and never in
+   PostgreSQL, and frees them with the chat tombstone. There is no upload history, no gallery and no
+   cross-chat reuse: the same bytes uploaded in two chats are two independent uploads.
+2. **The transport is a raw REST body plus a socket message.** `POST /api/v1/chats/:chatId/media?kind=…`
+   takes `application/octet-stream` (metadata in the query string) and answers with a `ChatMediaView`.
+   The realtime frame carries only `mediaId`, never bytes. This keeps the socket small and unblocked,
+   lets the upload have its own timeout and retry, and avoids adding a multipart parser dependency for
+   one endpoint. The message is what publishes the upload; until then the id is inert and expires.
+3. **The server is the authority on every step.** The uploader must be an active participant of that
+   chat; a download requires the same; attaching checks chat, uploader and "not already attached"; and
+   every mismatch is the same `MEDIA_NOT_FOUND` so the route cannot be used to enumerate chats. The
+   owner's hidden chats are read through a separate `AdminGuard` route, because the owner is not a
+   participant and the normal check must keep refusing them.
+4. **The bytes decide the type.** The declared `Content-Type` is only a cross-check: the server sniffs
+   the container (JPEG, PNG, WebP, GIF, WebM, OGG, MP4, MPEG, WAV, AAC), refuses anything else with
+   `MEDIA_TYPE_UNSUPPORTED`, and serves the detected type back with `X-Content-Type-Options: nosniff` and
+   `Cache-Control: no-store`. SVG is deliberately not accepted: it is an XSS primitive the moment the
+   same bytes are opened directly.
+5. **Budgets are explicit and refuse rather than evict.** A chat holds at most 32 attachments and 32 MB;
+   the process holds 128 MB; per-kind uploads are capped at 8 MB (image, voice) and 16 MB (audio); a
+   voice message is at most 2 minutes and an audio file at most 10. An upload that would cross a limit is
+   refused, because evicting an earlier photo would silently turn a message the user can still scroll to
+   into a broken one. An upload that never becomes a message is deleted after 10 minutes.
+6. **The browser prepares photos; the server still re-checks.** A picked photo is decoded, scaled to a
+   1600 px longest edge and re-encoded (WebP, or JPEG with a white background where WebP encoding is
+   unavailable), which bounds the upload and strips EXIF/GPS. GIFs pass through unchanged so animation
+   survives. Voice is recorded with `MediaRecorder` (WebM/Opus where available, MP4/AAC on Safari) and
+   its wall-clock duration is sent with the upload.
+7. **The archive does not learn a new storage format.** Attachment-only messages are skipped by the
+   archive; a caption is archived exactly like text. The `storeMedia` policy flags stay reserved: storing
+   media in PostgreSQL would need a separate retention, size and backup decision, and copying bytes into
+   the archive without one would be a silent second store. `/admin` can display and download media from a
+   hidden chat, but it cannot upload as the owner.
+8. **The client fetches bytes, never a URL.** The interface requests an attachment through the
+   identity-guarded route and renders it from a tab-local `blob:` object URL, revoked when the bubble
+   unmounts. A copied `<img src>` therefore grants nothing outside the session, and the message itself
+   contains metadata only.
+
+**Consequences.** Attachments are lost on an API restart and are not covered by backups; that is a
+consequence of keeping the product's default no-storage promise and is stated in `docs/SECURITY.md`. A
+32 MB/chat and 128 MB/process budget bounds a single API instance but is not shared between instances, so
+horizontal scaling needs shared storage and a shared budget before it can work; this is the same
+in-process-state seam as D5.
+The in-memory map is synchronous on purpose: claiming an upload and creating the message around it happen
+in one event-loop turn, so two sockets cannot attach the same upload. The owner can read target-sent media
+in hidden chats but cannot send media as a persona yet; adding that needs the same guarded route and an
+explicit decision about whether the owner's files are ever archived.
+
+**Rejected.** Multipart/form-data (a parser dependency and a second content-type path for no gain);
+sending base64 in the socket frame (large frames, head-of-line blocking, and a copy of the bytes in every
+log that records payloads); a public or signed URL (shareable outside the session and a second
+authorisation model); writing files to disk (a retention and backup surface without a scanner); storing
+bytes in PostgreSQL (the default is no message content, and large blobs in the primary database are worse
+than a dedicated store); trusting the browser's MIME type (it is client input); accepting SVG (XSS);
+evicting old attachments to make room (silently breaks visible messages); archiving media without a
+separate decision (`storeMedia` remains reserved).
+
+---

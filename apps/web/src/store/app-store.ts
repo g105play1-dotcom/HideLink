@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import {
   ABSOLUTE_MESSAGE_MAX_LENGTH,
   type ChatEndReason,
+  type ChatMediaView,
   type DeclaredProfile,
   type RelaxableCriterion,
   type SearchPreferences,
@@ -78,6 +79,8 @@ export interface UiMessage {
   messageId?: string;
   from: 'you' | 'peer' | 'system';
   text: string;
+  /** Attachment metadata; the bytes are fetched from the guarded API route. */
+  media?: ChatMediaView;
   sentAt: string;
   status?: MessageStatus;
   failureReason?: string;
@@ -206,7 +209,7 @@ export interface AppState {
   startChat: (chat: ChatInfo, messages: UiMessage[]) => void;
   restoreChat: (chat: ChatInfo, messages: UiMessage[]) => void;
   /** Adds an optimistic outgoing message; returns its idempotency key. */
-  queueOutgoingMessage: (text: string) => string;
+  queueOutgoingMessage: (text: string, media?: ChatMediaView) => string;
   receiveMessage: (view: ChatMessageView) => void;
   confirmMessage: (clientMessageId: string, messageId: string, sentAt: string) => void;
   failMessage: (clientMessageId: string, reason: string) => void;
@@ -238,6 +241,7 @@ export function toUiMessage(view: ChatMessageView): UiMessage {
     messageId: view.messageId,
     from: view.from,
     text: view.text,
+    ...(view.media ? { media: view.media } : {}),
     sentAt: view.sentAt,
     // Our own messages are already confirmed by the time they come back.
     ...(view.from === 'you' ? { status: 'sent' as const } : {}),
@@ -411,7 +415,7 @@ export const useAppStore = create<AppState>((set) => ({
       friendsInChat: false,
     }),
 
-  queueOutgoingMessage: (text) => {
+  queueOutgoingMessage: (text, media) => {
     const clientMessageId = randomId(16);
     set((state) => ({
       messages: [
@@ -421,6 +425,7 @@ export const useAppStore = create<AppState>((set) => ({
           clientMessageId,
           from: 'you',
           text,
+          ...(media ? { media } : {}),
           sentAt: new Date().toISOString(),
           status: 'sending',
         },

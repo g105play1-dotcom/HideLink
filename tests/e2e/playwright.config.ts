@@ -41,6 +41,12 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
+    // A voice-message test needs a microphone that does not exist on a CI machine. The
+    // fake device produces real MediaRecorder output, so the encoding path is exercised
+    // for real rather than mocked in the browser.
+    launchOptions: {
+      args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+    },
   },
 
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],

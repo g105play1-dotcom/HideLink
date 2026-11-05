@@ -126,8 +126,8 @@ export class ArchiveService implements OnModuleInit {
    * Stores one message of an archived chat.
    *
    * Fire-and-forget from the caller's point of view, but ordered per chat (see the class
-   * comment). A message the policy does not cover (media-only today, or archiving just
-   * switched off) is skipped entirely, which is why the text can be null.
+   * comment). A message the policy does not cover (an attachment without a caption, or
+   * archiving just switched off) is skipped entirely, which is why the text can be null.
    */
   recordMessage(chat: ChatRecord, message: StoredMessage): Promise<void> {
     const policy = this.policy;
@@ -135,9 +135,11 @@ export class ArchiveService implements OnModuleInit {
     // stop recording immediately, not after the current conversation ends.
     if (!policy.enabled) return Promise.resolve();
 
-    const text = policy.storeText ? message.text : null;
-    // Attachments do not exist in the product yet, so `mediaKind` is always null for now;
-    // the branch keeps "media only" honest instead of writing empty rows.
+    // Attachment bytes are ephemeral by design and are not copied into PostgreSQL. The
+    // `storeMedia` policy flags remain reserved until there is a storage decision that
+    // covers them (docs/DECISIONS.md D21, D40). A media-only message therefore has no
+    // archive row; a caption, if present, is archived like any other text.
+    const text = policy.storeText && message.text.length > 0 ? message.text : null;
     const mediaKind: MediaKind | null = null;
     if (text === null && mediaKind === null) return Promise.resolve();
 

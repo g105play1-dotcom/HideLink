@@ -3,18 +3,22 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   Post,
   Put,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import {
   adminOwnerChatParamsSchema,
   adminOwnerMessageSchema,
   adminUserQuerySchema,
+  chatMediaParamsSchema,
   userLookupParamsSchema,
+  type ChatMediaParams,
   type AdminOwnerChatListResponse,
   type AdminOwnerChatParams,
   type AdminOwnerChatView,
@@ -96,6 +100,24 @@ export class OwnerAdminController {
     @Param(zodParam(adminOwnerChatParamsSchema)) params: AdminOwnerChatParams,
   ): AdminOwnerChatView {
     return this.owner.readChat(params.chatId);
+  }
+
+  /**
+   * An attachment the target sent to the hidden persona.
+   *
+   * The owner is not a chat participant, so the normal participant check cannot apply.
+   * The guarded admin session plus the owner-chat index are the authorisation: only a
+   * chat the owner themselves created through `join` can be read here.
+   */
+  @Get('chats/:chatId/media/:mediaId')
+  @Header('X-Content-Type-Options', 'nosniff')
+  @Header('Cache-Control', 'no-store')
+  media(@Param(zodParam(chatMediaParamsSchema)) params: ChatMediaParams): StreamableFile {
+    const stored = this.owner.readMedia(params.chatId, params.mediaId);
+    return new StreamableFile(stored.bytes, {
+      type: stored.view.mimeType,
+      length: stored.view.size,
+    });
   }
 
   /** Sends as the hidden peer, through the same sanitisation as any other message. */

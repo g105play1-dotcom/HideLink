@@ -66,6 +66,14 @@ function defaultMessage(code: ErrorCode): string {
       return 'The message is too long.';
     case ErrorCode.MESSAGE_EMPTY:
       return 'The message is empty.';
+    case ErrorCode.MEDIA_NOT_FOUND:
+      return 'This attachment is no longer available.';
+    case ErrorCode.MEDIA_TOO_LARGE:
+      return 'The file is too large.';
+    case ErrorCode.MEDIA_TYPE_UNSUPPORTED:
+      return 'This file type is not supported.';
+    case ErrorCode.MEDIA_LIMIT_REACHED:
+      return 'This conversation has reached its attachment limit.';
     case ErrorCode.RATE_LIMITED:
       return 'Too many requests. Please slow down.';
     case ErrorCode.TOO_MANY_CONNECTIONS:
@@ -113,6 +121,8 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.MESSAGE_TOO_LONG:
     case ErrorCode.MESSAGE_EMPTY:
       return 400;
+    case ErrorCode.MEDIA_TYPE_UNSUPPORTED:
+      return 415;
     case ErrorCode.IDENTITY_REQUIRED:
     case ErrorCode.IDENTITY_NOT_FOUND:
     case ErrorCode.ADMIN_AUTH_REQUIRED:
@@ -127,9 +137,11 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.REQUEST_EXPIRED:
     case ErrorCode.FRIEND_REQUEST_NOT_FOUND:
     case ErrorCode.FRIEND_REQUEST_EXPIRED:
+    case ErrorCode.MEDIA_NOT_FOUND:
     case ErrorCode.ROUTE_NOT_FOUND:
       return 404;
     case ErrorCode.PAYLOAD_TOO_LARGE:
+    case ErrorCode.MEDIA_TOO_LARGE:
       return 413;
     case ErrorCode.ALREADY_IN_CHAT:
     case ErrorCode.NOT_A_PARTICIPANT:
@@ -141,6 +153,7 @@ function defaultStatus(code: ErrorCode): number {
     case ErrorCode.BLOCKED:
     case ErrorCode.BLOCKING_DISABLED:
     case ErrorCode.SELF_TARGET_NOT_ALLOWED:
+    case ErrorCode.MEDIA_LIMIT_REACHED:
       return 409;
     case ErrorCode.RATE_LIMITED:
     case ErrorCode.TOO_MANY_CONNECTIONS:

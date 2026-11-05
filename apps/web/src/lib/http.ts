@@ -41,9 +41,17 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** Serialised as JSON. Omit for bodyless requests. */
   json?: unknown;
+  /** Raw request body, used by the attachment upload. Takes precedence over `json`. */
+  body?: BodyInit;
+  /** `Content-Type` for a raw body. */
+  contentType?: string;
   /** Abort after this many milliseconds. */
   timeoutMs?: number;
   signal?: AbortSignal;
+}
+
+interface FetchOptions extends ApiRequestOptions {
+  accept: string;
 }
 
 /**
@@ -53,7 +61,43 @@ export interface ApiRequestOptions {
  * session lives in an `HttpOnly` cookie the JavaScript side must never touch.
  */
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  const { method = 'GET', json, timeoutMs = 10_000, signal } = options;
+  const response = await apiFetch(path, { ...options, accept: 'application/json' });
+
+  if (response.status === 204) return undefined as T;
+
+  const text = await response.text();
+  const body: unknown = text ? safeJsonParse(text) : undefined;
+
+  if (!response.ok) throw toApiError(body, response.status);
+
+  return body as T;
+}
+
+/**
+ * Fetches attachment bytes.
+ *
+ * A separate function because `apiRequest` parses JSON, and an attachment response is
+ * binary. The error path still reads the JSON error envelope, so a missing or forbidden
+ * attachment reaches the UI as a normal `ApiError` (and a Russian message), not as a
+ * broken image.
+ */
+export async function apiBlob(path: string, options: ApiRequestOptions = {}): Promise<Blob> {
+  const response = await apiFetch(path, {
+    ...options,
+    accept: '*/*',
+    timeoutMs: options.timeoutMs ?? 30_000,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw toApiError(text ? safeJsonParse(text) : undefined, response.status);
+  }
+
+  return response.blob();
+}
+
+async function apiFetch(path: string, options: FetchOptions): Promise<Response> {
+  const { method = 'GET', json, body, contentType, timeoutMs = 10_000, signal, accept } = options;
 
   // Combine the caller's signal with our own timeout so neither can be ignored.
   const controller = new AbortController();
@@ -61,16 +105,19 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   const onAbort = () => controller.abort();
   signal?.addEventListener('abort', onAbort, { once: true });
 
-  let response: Response;
+  const requestBody = json !== undefined ? JSON.stringify(json) : body;
+  const requestContentType =
+    json !== undefined ? 'application/json' : requestBody === undefined ? undefined : contentType;
+
   try {
-    response = await fetch(`${API_BASE}${path}`, {
+    return await fetch(`${API_BASE}${path}`, {
       method,
       credentials: 'include',
       headers: {
-        accept: 'application/json',
-        ...(json === undefined ? {} : { 'content-type': 'application/json' }),
+        accept,
+        ...(requestContentType ? { 'content-type': requestContentType } : {}),
       },
-      ...(json === undefined ? {} : { body: JSON.stringify(json) }),
+      ...(requestBody === undefined ? {} : { body: requestBody }),
       signal: controller.signal,
     });
   } catch (error) {
@@ -91,24 +138,17 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     clearTimeout(timeout);
     signal?.removeEventListener('abort', onAbort);
   }
+}
 
-  if (response.status === 204) return undefined as T;
-
-  const text = await response.text();
-  const body: unknown = text ? safeJsonParse(text) : undefined;
-
-  if (!response.ok) {
-    const parsed = (body ?? {}) as ErrorBody;
-    const code = isErrorCode(parsed.error?.code) ? parsed.error.code : ErrorCode.INTERNAL_ERROR;
-    throw new ApiError(
-      code,
-      parsed.error?.message ?? 'Request failed.',
-      response.status,
-      parsed.error?.context,
-    );
-  }
-
-  return body as T;
+function toApiError(body: unknown, status: number): ApiError {
+  const parsed = (body ?? {}) as ErrorBody;
+  const code = isErrorCode(parsed.error?.code) ? parsed.error.code : ErrorCode.INTERNAL_ERROR;
+  return new ApiError(
+    code,
+    parsed.error?.message ?? 'Request failed.',
+    status,
+    parsed.error?.context,
+  );
 }
 
 function safeJsonParse(text: string): unknown {

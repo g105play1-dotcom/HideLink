@@ -42,6 +42,7 @@ export function buildMessageView(
     chatId: chat.chatId,
     from: isMine ? 'you' : 'peer',
     text: message.text,
+    ...(message.media ? { media: message.media } : {}),
     sentAt: message.sentAt.toISOString(),
     // The idempotency key is echoed only to its author: it is meaningless to the
     // peer and would let one side correlate a sender's retries across chats.

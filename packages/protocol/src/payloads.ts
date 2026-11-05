@@ -1,6 +1,7 @@
 import type {
   ChatEndReason,
   ChatKind,
+  ChatMediaView,
   ChatMessageInput,
   ConnectRequestInput,
   ConnectRespondInput,
@@ -76,7 +77,10 @@ export interface ChatMessageView {
   messageId: string;
   chatId: string;
   from: 'you' | 'peer';
+  /** Empty only when the message consists of an attachment. */
   text: string;
+  /** Attachment metadata. The bytes are fetched from the guarded REST route. */
+  media?: ChatMediaView;
   /** ISO-8601 UTC timestamp assigned by the server. */
   sentAt: string;
   /**

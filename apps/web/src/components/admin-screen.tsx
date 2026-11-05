@@ -63,6 +63,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
+import { MessageMedia } from '@/components/message-media';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -2076,7 +2077,17 @@ function OwnerChatPanel({ chatId, onClose }: { chatId: string; onClose: () => vo
                 : 'self-start rounded-lg bg-muted px-3 py-2 text-sm'
             }
           >
-            <p className="whitespace-pre-wrap">{message.text}</p>
+            {message.media ? (
+              <div className="mb-1">
+                <MessageMedia
+                  chatId={chatId}
+                  media={message.media}
+                  admin
+                  mine={message.from === 'owner'}
+                />
+              </div>
+            ) : null}
+            {message.text ? <p className="whitespace-pre-wrap">{message.text}</p> : null}
             <p className="mt-1 text-[11px] opacity-70">
               {message.from === 'owner' ? 'Вы' : 'Собеседник'} · {formatTimestamp(message.sentAt)}
             </p>

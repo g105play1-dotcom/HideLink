@@ -129,6 +129,8 @@ describe('ChatService friend-request expiry', () => {
     const service = new ChatService(
       unused,
       registry,
+      // Attachment store; this path never touches media.
+      unused,
       unused,
       unused,
       unused,

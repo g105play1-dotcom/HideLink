@@ -6,6 +6,7 @@ import type {
   ReportReason,
   ReportStatus,
 } from './limits.js';
+import type { ChatMediaView } from './media.js';
 import type { DeclaredProfile, SearchPreferences } from './preferences.js';
 
 /**
@@ -194,6 +195,8 @@ export interface AdminOwnerChatView {
     from: 'owner' | 'target';
     text: string;
     sentAt: string;
+    /** Attachment metadata; the bytes are fetched through the guarded admin media route. */
+    media: ChatMediaView | null;
   }>;
 }
 

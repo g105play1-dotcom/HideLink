@@ -17,6 +17,11 @@ import {
   REPORT_STATUSES,
 } from './limits.js';
 import {
+  MEDIA_AUDIO_MAX_DURATION_MS,
+  MEDIA_VOICE_MAX_DURATION_MS,
+  chatMediaKindSchema,
+} from './media.js';
+import {
   PROFILE_LIMITS,
   genderSchema,
   languageSchema,
@@ -73,14 +78,75 @@ export const emptySchema = z.object({}).strict();
 /** WebSocket: `match:join` */
 export const matchJoinSchema = z.object({}).strict();
 
-/** WebSocket: `chat:message` */
+/**
+ * WebSocket: `chat:message`.
+ *
+ * A message carries text, an uploaded attachment id, or both. The attachment is uploaded
+ * over REST first, because keeping binary data out of the realtime frame is what lets the
+ * socket stay small and lets the upload have its own timeout, progress and retry. The
+ * server checks that `mediaId` belongs to this chat and to this sender; the id alone grants
+ * nothing.
+ */
 export const chatMessageSchema = z
   .object({
     chatId: chatIdSchema,
     clientMessageId: clientMessageIdSchema,
-    text: messageTextSchema,
+    text: messageTextSchema.optional(),
+    mediaId: z.uuid().optional(),
   })
-  .strict();
+  .strict()
+  .refine((input) => input.mediaId !== undefined || input.text !== undefined, {
+    message: ErrorCode.MESSAGE_EMPTY,
+    path: ['text'],
+  });
+
+/** REST: `POST /api/v1/chats/:chatId/media` */
+export const chatMediaUploadParamsSchema = z.object({ chatId: chatIdSchema }).strict();
+
+/** REST: `GET /api/v1/chats/:chatId/media/:mediaId` (and the owner equivalent) */
+export const chatMediaParamsSchema = z.object({ chatId: chatIdSchema, mediaId: z.uuid() }).strict();
+
+/**
+ * REST: `POST /api/v1/chats/:chatId/media?kind=…&durationMs=…`.
+ *
+ * The bytes are the request body; metadata is in the query so the body can stay a raw
+ * `application/octet-stream` without a multipart parser. `durationMs` is required for a
+ * voice message (the browser knows exactly how long it recorded) and optional for an audio
+ * file, whose duration may not be known until the client decodes it.
+ */
+export const mediaUploadQuerySchema = z
+  .object({
+    kind: chatMediaKindSchema,
+    durationMs: z.coerce.number().int().min(1).max(MEDIA_AUDIO_MAX_DURATION_MS).optional(),
+  })
+  .strict()
+  .superRefine((query, context) => {
+    if (query.kind === 'image' && query.durationMs !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['durationMs'],
+        message: 'Images do not have a duration.',
+      });
+    }
+    if (query.kind === 'voice' && query.durationMs === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['durationMs'],
+        message: 'A voice message must carry its duration.',
+      });
+    }
+    if (
+      query.kind === 'voice' &&
+      query.durationMs !== undefined &&
+      query.durationMs > MEDIA_VOICE_MAX_DURATION_MS
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['durationMs'],
+        message: 'The voice message is too long.',
+      });
+    }
+  });
 
 /** WebSocket: `chat:leave` / `chat:next` */
 export const chatLeaveSchema = z
@@ -156,6 +222,9 @@ export { settingsUpdateSchema as settingsSchema } from './preferences.js';
 
 export type PublicId = z.infer<typeof publicIdSchema>;
 export type ChatMessageInput = z.infer<typeof chatMessageSchema>;
+export type ChatMediaUploadParams = z.infer<typeof chatMediaUploadParamsSchema>;
+export type ChatMediaParams = z.infer<typeof chatMediaParamsSchema>;
+export type MediaUploadQuery = z.infer<typeof mediaUploadQuerySchema>;
 export type ConnectRequestInput = z.infer<typeof connectRequestSchema>;
 export type ConnectRespondInput = z.infer<typeof connectRespondSchema>;
 export type FriendRequestInput = z.infer<typeof friendRequestSchema>;

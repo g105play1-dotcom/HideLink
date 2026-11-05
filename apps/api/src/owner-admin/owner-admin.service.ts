@@ -15,6 +15,7 @@ import { Prisma } from '../generated/prisma/client.js';
 
 import { AppError } from '../common/app-error.js';
 import { ChatService } from '../chat/chat.service.js';
+import type { StoredMedia } from '../chat/chat.media.js';
 import type { ChatRecord } from '../chat/chat.registry.js';
 import { DirectoryService } from '../directory/directory.service.js';
 import {
@@ -172,9 +173,14 @@ export class OwnerAdminService {
         messageId: message.messageId,
         from: message.senderId === found.entry.personaId ? 'owner' : 'target',
         text: message.text,
+        media: message.media ?? null,
         sentAt: message.sentAt.toISOString(),
       })),
     };
+  }
+
+  readMedia(chatId: string, mediaId: string): StoredMedia {
+    return this.chat.readOwnerMedia(chatId, mediaId);
   }
 
   sendMessage(chatId: string, text: string): { messageId: string; sentAt: string } {

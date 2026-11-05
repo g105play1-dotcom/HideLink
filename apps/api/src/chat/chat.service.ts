@@ -5,8 +5,11 @@ import {
   ErrorCode,
   FRIEND_REQUEST_TTL_MS,
   activeFilterCount,
+  isAllowedMediaMime,
   mutuallyCompatible,
+  normalizeMediaMimeType,
   relaxBySteps,
+  type ChatMediaKind,
   type ChatMessageInput,
   type ReportReason,
   type SearchPreferences,
@@ -28,6 +31,7 @@ import { PresenceService } from '../presence/presence.service.js';
 import { AppEventBus, type ChatEndReasonSource } from '../events/app-events.js';
 import { FriendRequestService, type FriendRequest } from '../friends/friend-requests.js';
 import { FriendsService } from '../friends/friends.service.js';
+import { ChatMediaStoreService, sniffMediaMime, type StoredMedia } from './chat.media.js';
 import { ChatRegistryService, type ChatRecord, type StoredMessage } from './chat.registry.js';
 import { MatchingService } from './chat.matching.js';
 import { ConnectionRequestService } from './chat.requests.js';
@@ -125,6 +129,7 @@ export class ChatService implements OnApplicationShutdown {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: ChatRegistryService,
+    private readonly media: ChatMediaStoreService,
     private readonly matching: MatchingService,
     private readonly requests: ConnectionRequestService,
     private readonly directory: DirectoryService,
@@ -454,18 +459,39 @@ export class ChatService implements OnApplicationShutdown {
     if (!chat.hasParticipant(userId)) throw new AppError(ErrorCode.NOT_A_PARTICIPANT);
     if (!chat.isActive) throw new AppError(ErrorCode.CHAT_ENDED);
 
-    const sanitized = sanitizeMessageText(input.text, this.config.MESSAGE_MAX_LENGTH);
-    if (sanitized.empty) throw new AppError(ErrorCode.MESSAGE_EMPTY);
+    // Replay is checked before the attachment is claimed: a retry must return the first
+    // message, and the uploaded media id is already attached to it. Doing this after
+    // `attach` would turn a harmless network retry into "attachment not found".
+    const existing = input.clientMessageId
+      ? chat.findClientMessage(userId, input.clientMessageId)
+      : undefined;
+    if (existing) return { messageId: existing.messageId, sentAt: existing.sentAt };
+
+    const sanitized = sanitizeMessageText(input.text ?? '', this.config.MESSAGE_MAX_LENGTH);
+    // A caption is optional when there is an attachment; text-only messages still may not
+    // be empty or vanish into zero-width characters.
+    if (sanitized.empty && !input.mediaId) throw new AppError(ErrorCode.MESSAGE_EMPTY);
     // Rejected rather than quietly shortened: a sender whose message arrives cut in
     // half has no way to know, and the peer silently receives something the sender did
     // not write. The web composer caps input at the same limit, so this is the
     // server-side backstop, not the usual path.
     if (sanitized.truncated) throw new AppError(ErrorCode.MESSAGE_TOO_LONG);
 
+    const messageId = newMessageId();
+    const media = input.mediaId
+      ? this.media.attach({
+          mediaId: input.mediaId,
+          chatId: chat.chatId,
+          uploaderId: userId,
+          messageId,
+        })
+      : undefined;
+
     const candidate: StoredMessage = {
-      messageId: newMessageId(),
+      messageId,
       senderId: userId,
       text: sanitized.text,
+      ...(media ? { media } : {}),
       sentAt: new Date(),
       ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
     };
@@ -482,6 +508,70 @@ export class ChatService implements OnApplicationShutdown {
     if (!duplicate && chat.archived) this.trackWrite(this.archive.recordMessage(chat, message));
 
     return { messageId: message.messageId, sentAt: message.sentAt };
+  }
+
+  /**
+   * Validates and stores one uploaded attachment for a live chat.
+   *
+   * The caller is already a participant (checked here, not trusted from the controller),
+   * the declared type must agree with the bytes, and the per-chat/process budgets are
+   * enforced by the store. Nothing is sent to the peer yet: the message event is what
+   * publishes the attachment, and the upload id is otherwise useless.
+   */
+  storeMedia(
+    userId: string,
+    chatId: string,
+    kind: ChatMediaKind,
+    contentType: string | undefined,
+    bytes: Buffer,
+    durationMs?: number,
+  ): StoredMedia {
+    this.requireActiveChat(userId, chatId);
+
+    const detected = sniffMediaMime(bytes);
+    if (!detected || !isAllowedMediaMime(kind, detected)) {
+      throw new AppError(ErrorCode.MEDIA_TYPE_UNSUPPORTED);
+    }
+
+    const declared = normalizeMediaMimeType(contentType);
+    if (declared !== null && declared !== 'application/octet-stream' && declared !== detected) {
+      throw new AppError(ErrorCode.MEDIA_TYPE_UNSUPPORTED);
+    }
+
+    return this.media.create({
+      chatId,
+      uploaderId: userId,
+      kind,
+      mimeType: detected,
+      bytes,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    });
+  }
+
+  /** A participant fetches an attachment that belongs to a message in their chat. */
+  readMedia(userId: string, chatId: string, mediaId: string): StoredMedia {
+    const chat = this.registry.get(chatId);
+    if (!chat || !chat.hasParticipant(userId)) {
+      throw new AppError(ErrorCode.MEDIA_NOT_FOUND);
+    }
+
+    const stored = this.media.get(mediaId);
+    if (!stored || stored.chatId !== chatId || stored.messageId === null) {
+      throw new AppError(ErrorCode.MEDIA_NOT_FOUND);
+    }
+    return stored;
+  }
+
+  /** The owner reads an attachment from a hidden chat through the admin surface. */
+  readOwnerMedia(chatId: string, mediaId: string): StoredMedia {
+    const found = this.ownerChat(chatId);
+    if (!found) throw new AppError(ErrorCode.MEDIA_NOT_FOUND);
+
+    const stored = this.media.get(mediaId);
+    if (!stored || stored.chatId !== chatId || stored.messageId === null) {
+      throw new AppError(ErrorCode.MEDIA_NOT_FOUND);
+    }
+    return stored;
   }
 
   // ---------------------------------------------------------------------------
@@ -1086,6 +1176,7 @@ export class ChatService implements OnApplicationShutdown {
     expiredRequests: number;
     expiredFriendRequests: number;
     prunedChats: number;
+    prunedMedia: number;
   } {
     const expiredTickets = this.matching.sweep(now);
     for (const userId of expiredTickets) {
@@ -1115,11 +1206,18 @@ export class ChatService implements OnApplicationShutdown {
       if (!this.registry.get(chatId)) this.ownerChats.delete(chatId);
     }
 
+    // Attachment bytes follow the transcript exactly: when the tombstone is gone, the
+    // photos and recordings are freed with it. Uploads that never became a message have
+    // their own shorter deadline.
+    const prunedMedia =
+      this.media.pruneUnattached(now) + this.media.pruneTo(this.registry.retainedChatIds());
+
     return {
       expiredTickets: expiredTickets.length,
       expiredRequests: expiredRequests.length,
       expiredFriendRequests: expiredFriendRequests.length,
       prunedChats,
+      prunedMedia,
     };
   }
 
@@ -1139,6 +1237,8 @@ export class ChatService implements OnApplicationShutdown {
     this.graceTimers.clear();
 
     await this.flushWrites();
+    // The process is leaving; keeping bytes in a dying heap serves nobody.
+    this.media.clear();
   }
 
   /** Awaits fire-and-forget writes. Used by tests and graceful shutdown. */
@@ -1153,6 +1253,7 @@ export class ChatService implements OnApplicationShutdown {
     return {
       chatQueue: this.matching.depth(),
       ...this.registry.stats(),
+      ...this.media.stats(),
       ...this.presence.stats(),
       pendingRequests: this.requests.stats().pending,
       friendRequests: this.friendRequests.stats(),
@@ -1338,6 +1439,7 @@ export class ChatService implements OnApplicationShutdown {
       });
     } catch (error) {
       this.registry.abort(chatId);
+      this.media.pruneChat(chatId);
 
       // Put both back in the random queue: they were waiting for a chat, and the
       // service failing is not their fault. Re-queueing may pair them with someone

@@ -6,9 +6,11 @@ import {
   CircleAlert,
   CornerDownLeft,
   Flag,
+  ImagePlus,
   LoaderCircle,
   LogOut,
   MessageSquare,
+  Music,
   RefreshCw,
   Search,
   SkipForward,
@@ -19,9 +21,18 @@ import {
   UserRound,
   WifiOff,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+
+import {
+  MEDIA_AUDIO_MAX_DURATION_MS,
+  MEDIA_MAX_BYTES,
+  mediaAcceptAttribute,
+  type ChatMediaKind,
+} from '@anonlink/shared';
 
 import { AdSlot } from '@/components/ad-slot';
+import { MessageMedia } from '@/components/message-media';
+import { VoiceRecorder } from '@/components/voice-recorder';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -30,6 +41,7 @@ import { useI18n } from '@/i18n';
 import { client } from '@/lib/anonymous-client';
 import { describeChatEnd } from '@/lib/error-text';
 import { formatRemaining, formatTime } from '@/lib/format';
+import { fitsMediaLimit, prepareImageFile, readAudioDuration } from '@/lib/media-files';
 import { useTicker } from '@/lib/use-ticker';
 import { cn } from '@/lib/utils';
 import { useAppStore, type ChatInfo, type UiMessage } from '@/store/app-store';
@@ -71,12 +83,17 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
 
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
+  /** True while an attachment is being prepared, uploaded and published. */
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
   // Countdown for the outgoing friend request, if there is one.
   const now = useTicker(outgoingFriendRequest !== null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Keep the newest message in view as the conversation grows.
@@ -110,6 +127,116 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
       await action();
     } finally {
       setBusy(false);
+    }
+  }
+
+  /**
+   * Uploads one prepared attachment.
+   *
+   * The current draft becomes the caption and is cleared only after the message is
+   * acknowledged, so a failed upload leaves the typed text where the user left it.
+   */
+  async function uploadAttachment(
+    blob: Blob,
+    kind: ChatMediaKind,
+    durationMs?: number,
+  ): Promise<void> {
+    const caption = draft.trim();
+    const outcome = await client.sendMedia({
+      blob,
+      kind,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(caption ? { caption } : {}),
+    });
+
+    if (outcome.ok) {
+      setDraft('');
+      composerRef.current?.focus();
+    } else {
+      setAttachmentError(outcome.error);
+    }
+  }
+
+  /** Rejects an attachment whose caption would exceed the server's message limit. */
+  function captionTooLong(): boolean {
+    if (draft.length <= maxLength) return false;
+    setAttachmentError(
+      t('Сообщение слишком длинное — сократите его на {count} симв.', {
+        count: draft.length - maxLength,
+      }),
+    );
+    return true;
+  }
+
+  async function handlePhotoPicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    // Reset first so picking the same file twice still fires `change`.
+    event.target.value = '';
+    if (!file || ended || attachmentBusy || captionTooLong()) return;
+
+    setAttachmentError(null);
+    setAttachmentBusy(true);
+    try {
+      // Re-encoded before the size check: a modern phone photo is often above the limit
+      // as stored and comfortably below it once scaled down.
+      const prepared = await prepareImageFile(file);
+      if (!fitsMediaLimit('image', prepared.size)) {
+        setAttachmentError(
+          t('Файл больше {size} МБ — выберите изображение поменьше.', {
+            size: Math.round(MEDIA_MAX_BYTES.image / (1024 * 1024)),
+          }),
+        );
+        return;
+      }
+      await uploadAttachment(prepared, 'image');
+    } catch {
+      setAttachmentError(t('Не удалось обработать изображение. Попробуйте другое.'));
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }
+
+  async function handleAudioPicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || ended || attachmentBusy || captionTooLong()) return;
+
+    setAttachmentError(null);
+    setAttachmentBusy(true);
+    try {
+      if (!fitsMediaLimit('audio', file.size)) {
+        setAttachmentError(
+          t('Файл больше {size} МБ — выберите аудиофайл поменьше.', {
+            size: Math.round(MEDIA_MAX_BYTES.audio / (1024 * 1024)),
+          }),
+        );
+        return;
+      }
+
+      const durationMs = await readAudioDuration(file);
+      if (durationMs !== null && durationMs > MEDIA_AUDIO_MAX_DURATION_MS) {
+        setAttachmentError(
+          t('Аудиофайл длиннее {minutes} минут.', {
+            minutes: Math.round(MEDIA_AUDIO_MAX_DURATION_MS / 60_000),
+          }),
+        );
+        return;
+      }
+
+      await uploadAttachment(file, 'audio', durationMs ?? undefined);
+    } finally {
+      setAttachmentBusy(false);
+    }
+  }
+
+  async function handleVoiceRecorded(blob: Blob, durationMs: number): Promise<void> {
+    if (ended || attachmentBusy) return;
+    setAttachmentError(null);
+    setAttachmentBusy(true);
+    try {
+      await uploadAttachment(blob, 'voice', durationMs);
+    } finally {
+      setAttachmentBusy(false);
     }
   }
 
@@ -272,7 +399,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
         ) : null}
 
         {messages.map((message) => (
-          <MessageBubble key={message.key} message={message} />
+          <MessageBubble key={message.key} message={message} chatId={chat.chatId} />
         ))}
 
         <div ref={bottomRef} />
@@ -316,7 +443,53 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
           <label className="sr-only" htmlFor="chat-composer">
             {t('Сообщение')}
           </label>
-          <div className="flex items-end gap-2">
+
+          {/*
+            File inputs are hidden and opened by their visible buttons. They are not
+            `display:none` for the end-to-end suite: Playwright sets a file directly on
+            the input, which needs it to be present in the DOM, not necessarily visible.
+          */}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept={mediaAcceptAttribute('image')}
+            className="hidden"
+            onChange={(event) => void handlePhotoPicked(event)}
+          />
+          <input
+            ref={audioInputRef}
+            type="file"
+            accept="audio/*"
+            className="hidden"
+            onChange={(event) => void handleAudioPicked(event)}
+          />
+
+          <div className="flex items-end gap-1.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-10 shrink-0"
+              disabled={attachmentBusy || ended !== null}
+              onClick={() => photoInputRef.current?.click()}
+              aria-label={t('Прикрепить фото')}
+              title={t('Прикрепить фото')}
+            >
+              <ImagePlus className="size-4" aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-10 shrink-0"
+              disabled={attachmentBusy || ended !== null}
+              onClick={() => audioInputRef.current?.click()}
+              aria-label={t('Прикрепить аудиофайл')}
+              title={t('Прикрепить аудиофайл')}
+            >
+              <Music className="size-4" aria-hidden="true" />
+            </Button>
+
             <Textarea
               id="chat-composer"
               ref={composerRef}
@@ -330,11 +503,31 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               aria-invalid={tooLong}
               {...(tooLong ? { 'aria-describedby': 'composer-length' } : {})}
             />
+
+            <VoiceRecorder
+              disabled={attachmentBusy || ended !== null}
+              onRecorded={(blob, durationMs) => void handleVoiceRecorded(blob, durationMs)}
+              onError={setAttachmentError}
+            />
+
             <Button className="h-10" disabled={!canSend} onClick={send}>
               <CornerDownLeft className="size-4" aria-hidden="true" />
               {t('Отправить')}
             </Button>
           </div>
+
+          {attachmentBusy ? (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status">
+              <LoaderCircle className="size-3.5 animate-spin" aria-hidden="true" />
+              {t('Отправляем вложение…')}
+            </p>
+          ) : null}
+
+          {attachmentError ? (
+            <p className="text-xs text-destructive" role="alert">
+              {attachmentError}
+            </p>
+          ) : null}
 
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             {/*
@@ -342,7 +535,11 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
               browser translators do not translate `placeholder` attributes, and a Chinese
               user would keep a Russian instruction inside the field (docs/DECISIONS.md D29).
             */}
-            <span>{t('Только текст. Enter — отправить, Shift+Enter — новая строка.')}</span>
+            <span>
+              {t(
+                'Enter — отправить, Shift+Enter — новая строка. Можно прикрепить фото, аудио или записать голосовое.',
+              )}
+            </span>
             {/* Only shown near the limit, so it is a warning rather than noise. */}
             {draft.length > maxLength * 0.8 ? (
               <span
@@ -369,7 +566,7 @@ export function ChatPanel({ chat, canBlock, onReport, onBlock }: ChatPanelProps)
 }
 
 /** One message bubble. `from` is decided by the server, never guessed locally. */
-function MessageBubble({ message }: { message: UiMessage }) {
+function MessageBubble({ message, chatId }: { message: UiMessage; chatId: string }) {
   const { locale, t } = useI18n();
 
   if (message.from === 'system') {
@@ -400,20 +597,28 @@ function MessageBubble({ message }: { message: UiMessage }) {
           failed && 'bg-destructive text-destructive-foreground',
         )}
       >
-        {/*
-          The message is one text node, deliberately: browser translators translate per text
-          node, and a message split across spans (linkified words, per-word styling) reaches
-          the translator as unrelated fragments and comes back as nonsense
-          (docs/DECISIONS.md D29).
+        {message.media ? <MessageMedia chatId={chatId} media={message.media} mine={mine} /> : null}
 
-          `lang=""` means "language unknown", so a translator detects the language of this
-          message instead of assuming the interface language. `dir="auto"` picks the writing
-          direction from the first strong character — without it an Arabic or Hebrew message
-          is rendered left-to-right because the page is Russian.
-        */}
-        <span lang="" dir="auto" className="break-words whitespace-pre-wrap">
-          {message.text}
-        </span>
+        {message.text ? (
+          /*
+            The message is one text node, deliberately: browser translators translate per
+            text node, and a message split across spans (linkified words, per-word styling)
+            reaches the translator as unrelated fragments and comes back as nonsense
+            (docs/DECISIONS.md D29).
+
+            `lang=""` means "language unknown", so a translator detects the language of this
+            message instead of assuming the interface language. `dir="auto"` picks the writing
+            direction from the first strong character — without it an Arabic or Hebrew message
+            is rendered left-to-right because the page is Russian.
+          */
+          <span
+            lang=""
+            dir="auto"
+            className={cn('break-words whitespace-pre-wrap', message.media && 'mt-1 block')}
+          >
+            {message.text}
+          </span>
+        ) : null}
 
         <span
           className={cn(

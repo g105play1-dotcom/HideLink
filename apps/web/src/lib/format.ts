@@ -62,6 +62,14 @@ export function formatElapsed(fromIso: string, now: number = Date.now()): string
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+/** `1:07` — length of a voice message or an audio attachment. */
+export function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 /** `через 42 с` — used for request expiry. */
 export function formatRemaining(
   untilIso: string,

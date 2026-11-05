@@ -10,6 +10,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 export const newChatId = (): string => randomUUID();
 export const newMessageId = (): string => randomUUID();
+export const newMediaId = (): string => randomUUID();
 export const newRequestId = (): string => randomUUID();
 export const newReportId = (): string => randomUUID();
 

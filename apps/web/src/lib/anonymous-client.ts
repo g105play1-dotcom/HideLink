@@ -1,4 +1,10 @@
-import { ErrorCode, type ReportReason, type SessionView } from '@anonlink/shared';
+import {
+  ErrorCode,
+  type ChatMediaKind,
+  type ChatMediaView,
+  type ReportReason,
+  type SessionView,
+} from '@anonlink/shared';
 import {
   PROTOCOL_VERSION,
   type AckResult,
@@ -237,6 +243,77 @@ class AnonymousClient {
         current.failMessage(clientMessageId, describeError(result.error, getActiveLocale()));
       }
     });
+  }
+
+  /**
+   * Uploads an attachment, then sends the message that publishes it.
+   *
+   * Two steps on purpose: the bytes go over REST (so a large photo never blocks the
+   * socket, and the upload can fail without creating a message the peer sees), and only
+   * an accepted upload id is attached to a `chat:message`. The id alone grants nothing —
+   * the server checks that it belongs to this chat and to this sender before the message
+   * is stored, and the peer receives metadata, never a URL.
+   *
+   * The optimistic bubble is created only after the upload succeeds, so a failed upload
+   * does not leave a message in the transcript that can never be delivered.
+   */
+  async sendMedia(params: {
+    blob: Blob;
+    kind: ChatMediaKind;
+    /** Required for a voice message; optional for a picked audio file. */
+    durationMs?: number;
+    /** Caption typed in the composer, which may be empty. */
+    caption?: string;
+  }): Promise<CommandOutcome> {
+    const store = useAppStore.getState();
+    const chatId = store.chat?.chatId;
+    if (!chatId) return this.failWith(activeT('Чат не найден.'));
+
+    const query = new URLSearchParams({ kind: params.kind });
+    if (params.durationMs !== undefined) query.set('durationMs', String(params.durationMs));
+
+    let media: ChatMediaView;
+    try {
+      media = await apiRequest<ChatMediaView>(
+        `/chats/${encodeURIComponent(chatId)}/media?${query.toString()}`,
+        {
+          method: 'POST',
+          body: params.blob,
+          // The server sniffs the bytes and only uses this as a cross-check, so an empty
+          // `Blob.type` (some recorders and file managers omit it) is not fatal.
+          contentType: params.blob.type || 'application/octet-stream',
+          timeoutMs: 120_000,
+        },
+      );
+    } catch (error) {
+      return this.failWith(describeThrown(error));
+    }
+
+    // The chat may have ended while the upload was in flight. Sending now would only
+    // produce CHAT_NOT_FOUND after the user has waited for the upload.
+    const current = useAppStore.getState();
+    if (current.chat?.chatId !== chatId || current.endedChat) {
+      return this.failWith(activeT('Чат уже завершён — файл не отправлен.'));
+    }
+
+    const caption = params.caption?.trim() ?? '';
+    const clientMessageId = current.queueOutgoingMessage(caption, media);
+
+    const result = await this.command<ChatMessageResult>('chat:message', {
+      chatId,
+      clientMessageId,
+      ...(caption ? { text: caption } : {}),
+      mediaId: media.mediaId,
+    });
+
+    const after = useAppStore.getState();
+    if (result.ok) {
+      after.confirmMessage(clientMessageId, result.data.messageId, result.data.sentAt);
+      return { ok: true };
+    }
+
+    after.failMessage(clientMessageId, describeError(result.error, getActiveLocale()));
+    return { ok: false, error: describeError(result.error, getActiveLocale()) };
   }
 
   /** Ends the current chat and stays on the result screen. */
